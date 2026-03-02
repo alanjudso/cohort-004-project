@@ -1,18 +1,22 @@
-import { Link } from "react-router";
-import { data, isRouteErrorResponse } from "react-router";
-import { AlertTriangle } from "lucide-react";
+import { Link, data, isRouteErrorResponse } from "react-router";
 import type { Route } from "./+types/admin.instructor.$instructorId.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { UserRole } from "~/db/schema";
-import { getAnalyticsSummary, getRevenueTimeSeries, getPerCourseBreakdown, parsePeriod } from "~/services/analyticsService";
+import {
+  getAnalyticsSummary,
+  getRevenueTimeSeries,
+  getPerCourseBreakdown,
+  parsePeriod,
+} from "~/services/analyticsService";
 import { AnalyticsDashboard } from "~/components/analytics-dashboard";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "~/components/ui/button";
 
 export function meta() {
   return [
     { title: "Instructor Analytics — Cadence" },
-    { name: "description", content: "Instructor course revenue analytics" },
+    { name: "description", content: "View instructor course analytics" },
   ];
 }
 
@@ -20,9 +24,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const currentUserId = await getCurrentUserId(request);
 
   if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to view analytics.", {
-      status: 401,
-    });
+    throw data("Sign in to view analytics.", { status: 401 });
   }
 
   const currentUser = getUserById(currentUserId);
@@ -32,6 +34,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
 
   const instructorId = Number(params.instructorId);
+
+  if (!Number.isInteger(instructorId) || instructorId <= 0) {
+    throw data("Invalid instructor ID.", { status: 400 });
+  }
+
   const instructor = getUserById(instructorId);
 
   if (!instructor) {
@@ -44,11 +51,20 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const timeSeries = getRevenueTimeSeries(instructorId, period);
   const courseBreakdown = getPerCourseBreakdown(instructorId, period);
 
-  return { summary, period, timeSeries, courseBreakdown };
+  return {
+    summary,
+    timeSeries,
+    courseBreakdown,
+    period,
+    instructorName: instructor.name,
+  };
 }
 
-export default function AdminInstructorAnalytics({ loaderData }: Route.ComponentProps) {
-  const { summary, period, timeSeries, courseBreakdown } = loaderData;
+export default function AdminInstructorAnalytics({
+  loaderData,
+}: Route.ComponentProps) {
+  const { summary, timeSeries, courseBreakdown, period, instructorName } =
+    loaderData;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -61,17 +77,22 @@ export default function AdminInstructorAnalytics({ loaderData }: Route.Component
           Manage Users
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-foreground">Analytics</span>
+        <span className="text-foreground">{instructorName} — Analytics</span>
       </nav>
 
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Instructor Analytics</h1>
+        <h1 className="text-3xl font-bold">{instructorName} — Analytics</h1>
         <p className="mt-1 text-muted-foreground">
-          Revenue and enrollment overview for this instructor's courses
+          Revenue, enrollments, and ratings for this instructor
         </p>
       </div>
 
-      <AnalyticsDashboard summary={summary} period={period} timeSeries={timeSeries} courseBreakdown={courseBreakdown} />
+      <AnalyticsDashboard
+        summary={summary}
+        timeSeries={timeSeries}
+        courseBreakdown={courseBreakdown}
+        period={period}
+      />
     </div>
   );
 }
@@ -86,7 +107,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       message =
         typeof error.data === "string"
           ? error.data
-          : "Please select a user from the DevUI panel.";
+          : "Please sign in to view analytics.";
     } else if (error.status === 403) {
       title = "Access denied";
       message =
@@ -94,13 +115,14 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           ? error.data
           : "You don't have permission to access this page.";
     } else if (error.status === 404) {
-      title = "Instructor not found";
+      title = "Not found";
       message =
-        typeof error.data === "string" ? error.data : "This instructor does not exist.";
+        typeof error.data === "string"
+          ? error.data
+          : "The requested instructor was not found.";
     } else {
       title = `Error ${error.status}`;
-      message =
-        typeof error.data === "string" ? error.data : error.statusText;
+      message = typeof error.data === "string" ? error.data : error.statusText;
     }
   }
 
