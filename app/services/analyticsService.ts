@@ -9,6 +9,7 @@ import {
 } from "~/db/schema";
 
 export type AnalyticsPeriod = "7d" | "30d" | "12m" | "all";
+export type TimePeriod = AnalyticsPeriod;
 
 const VALID_PERIODS = new Set<string>(["7d", "30d", "12m", "all"]);
 
@@ -24,6 +25,36 @@ function getPeriodStart(period: AnalyticsPeriod): string | null {
   else if (period === "30d") now.setDate(now.getDate() - 30);
   else if (period === "12m") now.setFullYear(now.getFullYear() - 1);
   return now.toISOString();
+}
+
+function getStartDate(period: TimePeriod): string | null {
+  return getPeriodStart(period);
+}
+
+function generateDailyKeys(start: Date, end: Date): string[] {
+  const keys: string[] = [];
+  const cur = new Date(start);
+  cur.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+  while (cur <= last) {
+    keys.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return keys;
+}
+
+function generateMonthlyKeys(start: Date, end: Date): string[] {
+  const keys: string[] = [];
+  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  const last = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (cur <= last) {
+    keys.push(
+      `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`
+    );
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return keys;
 }
 
 export function getAnalyticsSummary(
@@ -299,47 +330,100 @@ export function getPerCourseBreakdown(
 export interface AdminAnalyticsSummary {
   totalRevenue: number;
   totalEnrollments: number;
-  topCourse: { title: string; revenue: number } | null;
+  topEarningCourse: { title: string; revenue: number } | null;
 }
 
-export function getAdminAnalyticsSummary(
-  period: AnalyticsPeriod
-): AdminAnalyticsSummary {
-  const periodStart = getPeriodStart(period);
+export function getAdminAnalyticsSummary(opts: {
+  period: TimePeriod;
+}): AdminAnalyticsSummary {
+  const startDate = getStartDate(opts.period);
 
-  const revenueRow = db
-    .select({ total: sum(purchases.pricePaid) })
+  const revenueResult = db
+    .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
     .from(purchases)
-    .where(periodStart ? gte(purchases.createdAt, periodStart) : undefined)
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1=1`)
     .get();
 
-  const enrollmentRow = db
-    .select({ total: count() })
+  const enrollmentResult = db
+    .select({ count: sql<number>`count(*)` })
     .from(enrollments)
-    .where(periodStart ? gte(enrollments.enrolledAt, periodStart) : undefined)
+    .where(
+      startDate ? sql`${enrollments.enrolledAt} >= ${startDate}` : sql`1=1`
+    )
     .get();
 
-  const topCourseRow = db
+  const topCourseResult = db
     .select({
       title: courses.title,
-      revenue: sum(purchases.pricePaid),
+      revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
     })
     .from(purchases)
     .innerJoin(courses, eq(purchases.courseId, courses.id))
-    .where(periodStart ? gte(purchases.createdAt, periodStart) : undefined)
-    .groupBy(purchases.courseId)
-    .orderBy(desc(sum(purchases.pricePaid)))
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1=1`)
+    .groupBy(courses.id)
+    .orderBy(sql`sum(${purchases.pricePaid}) desc`)
     .limit(1)
     .get();
 
   return {
-    totalRevenue: Number(revenueRow?.total ?? 0),
-    totalEnrollments: enrollmentRow?.total ?? 0,
-    topCourse: topCourseRow
-      ? {
-          title: topCourseRow.title,
-          revenue: Number(topCourseRow.revenue ?? 0),
-        }
+    totalRevenue: revenueResult?.total ?? 0,
+    totalEnrollments: enrollmentResult?.count ?? 0,
+    topEarningCourse: topCourseResult
+      ? { title: topCourseResult.title, revenue: topCourseResult.revenue }
       : null,
   };
+}
+
+export function getAdminRevenueTimeSeries(opts: {
+  period: TimePeriod;
+}): RevenueDataPoint[] {
+  const { period } = opts;
+  const now = new Date();
+  const useDaily = period === "7d" || period === "30d";
+
+  const startDateStr = getStartDate(period);
+  let rangeStart: Date;
+
+  if (startDateStr) {
+    rangeStart = new Date(startDateStr);
+  } else {
+    const earliest = db
+      .select({
+        minDate: sql<string | null>`min(${purchases.createdAt})`,
+      })
+      .from(purchases)
+      .get();
+
+    if (!earliest?.minDate) return [];
+    rangeStart = new Date(earliest.minDate);
+  }
+
+  const keys = useDaily
+    ? generateDailyKeys(rangeStart, now)
+    : generateMonthlyKeys(rangeStart, now);
+
+  const groupExpr = useDaily
+    ? sql<string>`substr(${purchases.createdAt}, 1, 10)`
+    : sql<string>`substr(${purchases.createdAt}, 1, 7)`;
+
+  const whereClause = startDateStr
+    ? sql`${purchases.createdAt} >= ${startDateStr}`
+    : sql`1=1`;
+
+  const rows = db
+    .select({
+      dateKey: groupExpr,
+      revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .where(whereClause)
+    .groupBy(groupExpr)
+    .all();
+
+  const revenueMap = new Map(rows.map((r) => [r.dateKey, r.revenue]));
+
+  return keys.map((key) => ({
+    date: key,
+    revenue: revenueMap.get(key) ?? 0,
+  }));
 }

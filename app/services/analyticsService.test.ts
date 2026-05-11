@@ -16,6 +16,8 @@ import {
   getRevenueTimeSeries,
   getPerCourseBreakdown,
   getAdminAnalyticsSummary,
+  getAdminRevenueTimeSeries,
+  type TimePeriod,
 } from "./analyticsService";
 
 describe("analyticsService", () => {
@@ -619,204 +621,284 @@ describe("analyticsService", () => {
   // ─── Admin Analytics Summary ───
 
   describe("getAdminAnalyticsSummary", () => {
-    function daysAgo(n: number) {
-      const d = new Date();
-      d.setDate(d.getDate() - n);
-      return d.toISOString();
-    }
+    it("returns zeros when no data exists", () => {
+      const result = getAdminAnalyticsSummary({ period: "all" });
 
-    it("sums revenue across all instructors", () => {
+      expect(result.totalRevenue).toBe(0);
+      expect(result.totalEnrollments).toBe(0);
+      expect(result.topEarningCourse).toBeNull();
+    });
+
+    it("aggregates revenue across all instructors", () => {
       const otherInstructor = testDb
         .insert(schema.users)
         .values({
           name: "Other Instructor",
-          email: "other-admin@example.com",
+          email: "other@example.com",
           role: schema.UserRole.Instructor,
         })
         .returning()
         .get();
+
       const otherCourse = testDb
         .insert(schema.courses)
         .values({
           title: "Other Course",
-          slug: "other-admin-course",
-          description: "desc",
+          slug: "other-course",
+          description: "Another course",
           instructorId: otherInstructor.id,
           categoryId: base.category.id,
           status: schema.CourseStatus.Published,
+          price: 9999,
         })
         .returning()
         .get();
 
       testDb
         .insert(schema.purchases)
-        .values({
-          userId: base.user.id,
-          courseId: base.course.id,
-          pricePaid: 5000,
-          country: "US",
-        })
-        .run();
-      testDb
-        .insert(schema.purchases)
-        .values({
-          userId: base.user.id,
-          courseId: otherCourse.id,
-          pricePaid: 3000,
-          country: "US",
-        })
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+          },
+          {
+            userId: base.user.id,
+            courseId: otherCourse.id,
+            pricePaid: 9999,
+            country: "US",
+          },
+        ])
         .run();
 
-      const result = getAdminAnalyticsSummary("all");
+      const result = getAdminAnalyticsSummary({ period: "all" });
 
-      expect(result.totalRevenue).toBe(8000);
+      expect(result.totalRevenue).toBe(14998);
     });
 
-    it("counts enrollments across all instructors", () => {
+    it("aggregates enrollments across all courses", () => {
       const otherInstructor = testDb
         .insert(schema.users)
         .values({
           name: "Other Instructor",
-          email: "other-admin2@example.com",
+          email: "other@example.com",
           role: schema.UserRole.Instructor,
         })
         .returning()
         .get();
+
       const otherCourse = testDb
         .insert(schema.courses)
         .values({
-          title: "Other Course 2",
-          slug: "other-admin-course-2",
-          description: "desc",
+          title: "Other Course",
+          slug: "other-course",
+          description: "Another course",
           instructorId: otherInstructor.id,
           categoryId: base.category.id,
           status: schema.CourseStatus.Published,
+          price: 9999,
         })
         .returning()
         .get();
 
       testDb
         .insert(schema.enrollments)
-        .values({ userId: base.user.id, courseId: base.course.id })
-        .run();
-      testDb
-        .insert(schema.enrollments)
-        .values({ userId: base.user.id, courseId: otherCourse.id })
+        .values([
+          { userId: base.user.id, courseId: base.course.id },
+          { userId: base.user.id, courseId: otherCourse.id },
+          { userId: otherInstructor.id, courseId: base.course.id },
+        ])
         .run();
 
-      const result = getAdminAnalyticsSummary("all");
+      const result = getAdminAnalyticsSummary({ period: "all" });
 
-      expect(result.totalEnrollments).toBe(2);
+      expect(result.totalEnrollments).toBe(3);
     });
 
-    it("returns the top earning course", () => {
+    it("identifies the top earning course", () => {
+      const course2 = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Premium Course",
+          slug: "premium-course",
+          description: "Expensive",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+          price: 9999,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 2000,
+            country: "US",
+          },
+          {
+            userId: base.user.id,
+            courseId: course2.id,
+            pricePaid: 9999,
+            country: "US",
+          },
+        ])
+        .run();
+
+      const result = getAdminAnalyticsSummary({ period: "all" });
+
+      expect(result.topEarningCourse).toEqual({
+        title: "Premium Course",
+        revenue: 9999,
+      });
+    });
+
+    it("respects time period filter", () => {
+      const now = new Date();
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(now.getDate() - 3);
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(now.getDate() - 10);
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+            createdAt: threeDaysAgo.toISOString(),
+          },
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 2500,
+            country: "US",
+            createdAt: tenDaysAgo.toISOString(),
+          },
+        ])
+        .run();
+
+      const result = getAdminAnalyticsSummary({ period: "7d" });
+
+      expect(result.totalRevenue).toBe(4999);
+    });
+  });
+
+  // ─── Admin Revenue Time Series ───
+
+  describe("getAdminRevenueTimeSeries", () => {
+    it("returns empty array when no purchases exist for all period", () => {
+      const result = getAdminRevenueTimeSeries({ period: "all" });
+      expect(result).toEqual([]);
+    });
+
+    it("returns daily data points for 7d period across all instructors", () => {
       const otherInstructor = testDb
         .insert(schema.users)
         .values({
           name: "Other Instructor",
-          email: "other-admin3@example.com",
+          email: "other@example.com",
           role: schema.UserRole.Instructor,
         })
         .returning()
         .get();
+
       const otherCourse = testDb
         .insert(schema.courses)
         .values({
-          title: "Big Earner",
-          slug: "big-earner",
-          description: "desc",
+          title: "Other Course",
+          slug: "other-course",
+          description: "Another course",
           instructorId: otherInstructor.id,
           categoryId: base.category.id,
           status: schema.CourseStatus.Published,
+          price: 9999,
         })
         .returning()
         .get();
 
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(now.getDate() - 2);
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+            createdAt: twoDaysAgo.toISOString(),
+          },
+          {
+            userId: base.user.id,
+            courseId: otherCourse.id,
+            pricePaid: 9999,
+            country: "US",
+            createdAt: twoDaysAgo.toISOString(),
+          },
+        ])
+        .run();
+
+      const result = getAdminRevenueTimeSeries({ period: "7d" });
+
+      expect(result.length).toBe(8);
+      const totalRevenue = result.reduce((sum, p) => sum + p.revenue, 0);
+      expect(totalRevenue).toBe(14998);
+    });
+
+    it("returns monthly data points for 12m period", () => {
+      const now = new Date();
+      const sixMonthsAgo = new Date(now);
+      sixMonthsAgo.setMonth(now.getMonth() - 6);
+
       testDb
         .insert(schema.purchases)
         .values({
           userId: base.user.id,
           courseId: base.course.id,
-          pricePaid: 1000,
+          pricePaid: 4999,
           country: "US",
-        })
-        .run();
-      testDb
-        .insert(schema.purchases)
-        .values({
-          userId: base.user.id,
-          courseId: otherCourse.id,
-          pricePaid: 9000,
-          country: "US",
+          createdAt: sixMonthsAgo.toISOString(),
         })
         .run();
 
-      const result = getAdminAnalyticsSummary("all");
+      const result = getAdminRevenueTimeSeries({ period: "12m" });
 
-      expect(result.topCourse).toEqual({ title: "Big Earner", revenue: 9000 });
+      expect(result.length).toBe(13);
+      expect(result[0].date).toMatch(/^\d{4}-\d{2}$/);
     });
 
-    it("returns null topCourse when there are no purchases", () => {
-      const result = getAdminAnalyticsSummary("all");
+    it("fills zero-revenue periods with $0 data points", () => {
+      const now = new Date();
+      const fiveDaysAgo = new Date(now);
+      fiveDaysAgo.setDate(now.getDate() - 5);
 
-      expect(result.topCourse).toBeNull();
-    });
-
-    it("returns 0 revenue and 0 enrollments when there is no data", () => {
-      const result = getAdminAnalyticsSummary("all");
-
-      expect(result.totalRevenue).toBe(0);
-      expect(result.totalEnrollments).toBe(0);
-    });
-
-    it("respects the time period filter", () => {
       testDb
         .insert(schema.purchases)
         .values({
           userId: base.user.id,
           courseId: base.course.id,
-          pricePaid: 5000,
+          pricePaid: 4999,
           country: "US",
-          createdAt: daysAgo(3),
-        })
-        .run();
-      testDb
-        .insert(schema.purchases)
-        .values({
-          userId: base.user.id,
-          courseId: base.course.id,
-          pricePaid: 2000,
-          country: "US",
-          createdAt: daysAgo(45),
+          createdAt: fiveDaysAgo.toISOString(),
         })
         .run();
 
-      const result = getAdminAnalyticsSummary("30d");
+      const result = getAdminRevenueTimeSeries({ period: "7d" });
 
-      expect(result.totalRevenue).toBe(5000);
-    });
+      const zeroDays = result.filter((p) => p.revenue === 0);
+      expect(zeroDays.length).toBe(7);
 
-    it("respects the time period filter for enrollments", () => {
-      testDb
-        .insert(schema.enrollments)
-        .values({
-          userId: base.user.id,
-          courseId: base.course.id,
-          enrolledAt: daysAgo(3),
-        })
-        .run();
-      testDb
-        .insert(schema.enrollments)
-        .values({
-          userId: base.user.id,
-          courseId: base.course.id,
-          enrolledAt: daysAgo(45),
-        })
-        .run();
-
-      const result = getAdminAnalyticsSummary("7d");
-
-      expect(result.totalEnrollments).toBe(1);
+      const purchaseDay = result.find((p) => p.revenue > 0);
+      expect(purchaseDay?.revenue).toBe(4999);
     });
   });
 });

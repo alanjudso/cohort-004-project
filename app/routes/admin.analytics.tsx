@@ -1,38 +1,43 @@
-import { Link } from "react-router";
-import { data, isRouteErrorResponse } from "react-router";
 import {
-  AlertTriangle,
-  DollarSign,
-  Users,
-  Trophy,
-  PackageOpen,
-} from "lucide-react";
+  Link,
+  data,
+  isRouteErrorResponse,
+  useNavigate,
+  useSearchParams,
+} from "react-router";
 import type { Route } from "./+types/admin.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { UserRole } from "~/db/schema";
 import {
   getAdminAnalyticsSummary,
-  parsePeriod,
+  getAdminRevenueTimeSeries,
+  type TimePeriod,
 } from "~/services/analyticsService";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { cn, formatPrice } from "~/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import {
+  AlertTriangle,
+  DollarSign,
+  PackageOpen,
+  Trophy,
+  Users,
+} from "lucide-react";
 import { Button } from "~/components/ui/button";
 
-const PERIODS = [
+const VALID_PERIODS: TimePeriod[] = ["7d", "30d", "12m", "all"];
+
+const PERIODS: { value: TimePeriod; label: string }[] = [
   { value: "7d", label: "7 days" },
   { value: "30d", label: "30 days" },
   { value: "12m", label: "12 months" },
   { value: "all", label: "All time" },
-] as const;
+];
 
 export function meta() {
   return [
     { title: "Platform Analytics — Cadence" },
-    {
-      name: "description",
-      content: "Platform-wide revenue and enrollment analytics",
-    },
+    { name: "description", content: "View platform-wide analytics" },
   ];
 }
 
@@ -45,21 +50,36 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const user = getUserById(currentUserId);
+  const currentUser = getUserById(currentUserId);
 
-  if (!user || user.role !== UserRole.Admin) {
-    throw data("Only admins can access this page.", { status: 403 });
+  if (!currentUser || currentUser.role !== UserRole.Admin) {
+    throw data("Only admins can access this page.", {
+      status: 403,
+    });
   }
 
   const url = new URL(request.url);
-  const period = parsePeriod(url.searchParams.get("period"));
-  const summary = getAdminAnalyticsSummary(period);
+  const periodParam = url.searchParams.get("period") ?? "30d";
+  const period: TimePeriod = VALID_PERIODS.includes(periodParam as TimePeriod)
+    ? (periodParam as TimePeriod)
+    : "30d";
 
-  return { summary, period };
+  const summary = getAdminAnalyticsSummary({ period });
+  const timeSeries = getAdminRevenueTimeSeries({ period });
+
+  return { summary, timeSeries, period };
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
   const { summary, period } = loaderData;
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  function handlePeriodChange(newPeriod: TimePeriod) {
+    const params = new URLSearchParams(searchParams);
+    params.set("period", newPeriod);
+    navigate(`?${params.toString()}`, { replace: true });
+  }
 
   const hasData = summary.totalRevenue > 0 || summary.totalEnrollments > 0;
 
@@ -76,16 +96,17 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Platform Analytics</h1>
         <p className="mt-1 text-muted-foreground">
-          Revenue and enrollment overview across all courses
+          Revenue and enrollment metrics across all courses
         </p>
       </div>
 
       <div className="space-y-6">
+        {/* Period Selector */}
         <div className="flex gap-1 rounded-lg bg-muted p-1">
           {PERIODS.map((p) => (
-            <Link
+            <button
               key={p.value}
-              to={`?period=${p.value}`}
+              onClick={() => handlePeriodChange(p.value)}
               className={cn(
                 "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                 period === p.value
@@ -94,11 +115,11 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
               )}
             >
               {p.label}
-            </Link>
+            </button>
           ))}
         </div>
 
-        {!hasData && (
+        {!hasData ? (
           <Card>
             <CardContent className="py-12 text-center">
               <PackageOpen className="mx-auto mb-3 size-10 text-muted-foreground/50" />
@@ -107,13 +128,11 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
               </h3>
               <p className="text-sm text-muted-foreground">
                 Revenue and enrollment data will appear here once courses have
-                purchases or enrollments.
+                sales or enrollments.
               </p>
             </CardContent>
           </Card>
-        )}
-
-        {hasData && (
+        ) : (
           <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -151,17 +170,19 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
                 <Trophy className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                {summary.topCourse ? (
+                {summary.topEarningCourse ? (
                   <>
-                    <div className="truncate text-2xl font-bold">
-                      {formatPrice(summary.topCourse.revenue)}
+                    <div className="text-2xl font-bold">
+                      {formatPrice(summary.topEarningCourse.revenue)}
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
-                      {summary.topCourse.title}
+                      {summary.topEarningCourse.title}
                     </p>
                   </>
                 ) : (
-                  <div className="text-2xl font-bold">N/A</div>
+                  <div className="text-2xl font-bold text-muted-foreground">
+                    N/A
+                  </div>
                 )}
               </CardContent>
             </Card>

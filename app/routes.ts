@@ -38,6 +38,7 @@ export default [
       "instructor/:courseId/students",
       "routes/instructor.$courseId.students.tsx"
     ),
+    route("admin/analytics", "routes/admin.analytics.tsx"),
     route("admin/users", "routes/admin.users.tsx"),
     route("admin/courses", "routes/admin.courses.tsx"),
     route("admin/categories", "routes/admin.categories.tsx"),
@@ -45,7 +46,6 @@ export default [
       "admin/instructor/:instructorId/analytics",
       "routes/admin.instructor.$instructorId.analytics.tsx"
     ),
-    route("admin/analytics", "routes/admin.analytics.tsx"),
     route("settings", "routes/settings.tsx"),
     route("team", "routes/team.tsx"),
     route("redeem/:code", "routes/redeem.$code.tsx"),
