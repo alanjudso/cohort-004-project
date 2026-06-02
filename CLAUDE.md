@@ -97,3 +97,4 @@ When returning tagged/discriminated results from services (not validation), use 
 ---
 
 Database is SQLite via better-sqlite3 + Drizzle. The db instance is initialized in `app/db/index.ts` with WAL mode and foreign keys enabled. Don't create new Database connections in service code unless you have a really good reason.
+
