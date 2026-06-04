@@ -80,6 +80,48 @@ describe("analyticsService", () => {
     });
   });
 
+  // ─── Period Boundary Filtering ───
+
+  describe("getAnalyticsSummary - period boundary filtering", () => {
+    function daysAgo(n: number) {
+      const d = new Date();
+      d.setDate(d.getDate() - n);
+      return d.toISOString();
+    }
+
+    it("includes a purchase created within the 30d window in totalRevenue", () => {
+      testDb.insert(schema.purchases).values({ userId: base.user.id, courseId: base.course.id, pricePaid: 3000, country: "US", createdAt: daysAgo(15) }).run();
+
+      const result = getAnalyticsSummary(base.instructor.id, "30d");
+
+      expect(result.totalRevenue).toBe(3000);
+    });
+
+    it("excludes a purchase created outside the 30d window from totalRevenue", () => {
+      testDb.insert(schema.purchases).values({ userId: base.user.id, courseId: base.course.id, pricePaid: 3000, country: "US", createdAt: daysAgo(45) }).run();
+
+      const result = getAnalyticsSummary(base.instructor.id, "30d");
+
+      expect(result.totalRevenue).toBe(0);
+    });
+
+    it("includes an enrollment created within the 7d window in totalEnrollments", () => {
+      testDb.insert(schema.enrollments).values({ userId: base.user.id, courseId: base.course.id, enrolledAt: daysAgo(3) }).run();
+
+      const result = getAnalyticsSummary(base.instructor.id, "7d");
+
+      expect(result.totalEnrollments).toBe(1);
+    });
+
+    it("excludes an enrollment created outside the 7d window from totalEnrollments", () => {
+      testDb.insert(schema.enrollments).values({ userId: base.user.id, courseId: base.course.id, enrolledAt: daysAgo(10) }).run();
+
+      const result = getAnalyticsSummary(base.instructor.id, "7d");
+
+      expect(result.totalEnrollments).toBe(0);
+    });
+  });
+
   // ─── Instructor Isolation ───
 
   describe("getAnalyticsSummary - instructor isolation", () => {
