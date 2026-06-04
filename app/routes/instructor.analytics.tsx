@@ -5,7 +5,7 @@ import type { Route } from "./+types/instructor.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { UserRole } from "~/db/schema";
-import { getAnalyticsSummary, parsePeriod } from "~/services/analyticsService";
+import { getAnalyticsSummary, getRevenueTimeSeries, getPerCourseBreakdown, parsePeriod } from "~/services/analyticsService";
 import { AnalyticsDashboard } from "~/components/analytics-dashboard";
 import { Button } from "~/components/ui/button";
 
@@ -34,12 +34,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const period = parsePeriod(url.searchParams.get("period"));
   const summary = getAnalyticsSummary(currentUserId, period);
+  const timeSeries = getRevenueTimeSeries(currentUserId, period);
+  const courseBreakdown = getPerCourseBreakdown(currentUserId, period);
 
-  return { summary, period };
+  return { summary, period, timeSeries, courseBreakdown };
 }
 
 export default function InstructorAnalytics({ loaderData }: Route.ComponentProps) {
-  const { summary, period } = loaderData;
+  const { summary, period, timeSeries, courseBreakdown } = loaderData;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -58,7 +60,7 @@ export default function InstructorAnalytics({ loaderData }: Route.ComponentProps
         </p>
       </div>
 
-      <AnalyticsDashboard summary={summary} period={period} />
+      <AnalyticsDashboard summary={summary} period={period} timeSeries={timeSeries} courseBreakdown={courseBreakdown} />
     </div>
   );
 }
