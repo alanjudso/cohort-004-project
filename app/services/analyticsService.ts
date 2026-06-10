@@ -1,6 +1,12 @@
-import { sum, count, avg, eq, and, gte, min, sql } from "drizzle-orm";
+import { sum, count, avg, eq, and, gte, min, sql, desc } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases, enrollments, courseRatings, courses } from "~/db/schema";
+import {
+  purchases,
+  enrollments,
+  courseRatings,
+  courses,
+  users,
+} from "~/db/schema";
 
 export type AnalyticsPeriod = "7d" | "30d" | "12m" | "all";
 
@@ -20,7 +26,10 @@ function getPeriodStart(period: AnalyticsPeriod): string | null {
   return now.toISOString();
 }
 
-export function getAnalyticsSummary(instructorId: number, period: AnalyticsPeriod) {
+export function getAnalyticsSummary(
+  instructorId: number,
+  period: AnalyticsPeriod
+) {
   const periodStart = getPeriodStart(period);
 
   const revenueRow = db
@@ -62,7 +71,8 @@ export function getAnalyticsSummary(instructorId: number, period: AnalyticsPerio
   return {
     totalRevenue: Number(revenueRow?.total ?? 0),
     totalEnrollments: enrollmentRow?.total ?? 0,
-    averageRating: ratingRow?.average != null ? Number(ratingRow.average) : null,
+    averageRating:
+      ratingRow?.average != null ? Number(ratingRow.average) : null,
     ratingCount: ratingRow?.total ?? 0,
   };
 }
@@ -111,7 +121,9 @@ export function getRevenueTimeSeries(
     const days = period === "7d" ? 7 : 30;
     const rows = db
       .select({
-        date: sql<string>`strftime('%Y-%m-%d', ${purchases.createdAt})`.as("date"),
+        date: sql<string>`strftime('%Y-%m-%d', ${purchases.createdAt})`.as(
+          "date"
+        ),
         revenue: sum(purchases.pricePaid),
       })
       .from(purchases)
@@ -202,7 +214,11 @@ export function getPerCourseBreakdown(
   const periodStart = getPeriodStart(period);
 
   const allCourses = db
-    .select({ courseId: courses.id, title: courses.title, listPrice: courses.price })
+    .select({
+      courseId: courses.id,
+      title: courses.title,
+      listPrice: courses.price,
+    })
     .from(courses)
     .where(eq(courses.instructorId, instructorId))
     .all();
@@ -276,4 +292,54 @@ export function getPerCourseBreakdown(
       ratingCount: r?.ratingCount ?? 0,
     };
   });
+}
+
+// ─── Admin (Platform-Wide) Analytics ───
+
+export interface AdminAnalyticsSummary {
+  totalRevenue: number;
+  totalEnrollments: number;
+  topCourse: { title: string; revenue: number } | null;
+}
+
+export function getAdminAnalyticsSummary(
+  period: AnalyticsPeriod
+): AdminAnalyticsSummary {
+  const periodStart = getPeriodStart(period);
+
+  const revenueRow = db
+    .select({ total: sum(purchases.pricePaid) })
+    .from(purchases)
+    .where(periodStart ? gte(purchases.createdAt, periodStart) : undefined)
+    .get();
+
+  const enrollmentRow = db
+    .select({ total: count() })
+    .from(enrollments)
+    .where(periodStart ? gte(enrollments.enrolledAt, periodStart) : undefined)
+    .get();
+
+  const topCourseRow = db
+    .select({
+      title: courses.title,
+      revenue: sum(purchases.pricePaid),
+    })
+    .from(purchases)
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .where(periodStart ? gte(purchases.createdAt, periodStart) : undefined)
+    .groupBy(purchases.courseId)
+    .orderBy(desc(sum(purchases.pricePaid)))
+    .limit(1)
+    .get();
+
+  return {
+    totalRevenue: Number(revenueRow?.total ?? 0),
+    totalEnrollments: enrollmentRow?.total ?? 0,
+    topCourse: topCourseRow
+      ? {
+          title: topCourseRow.title,
+          revenue: Number(topCourseRow.revenue ?? 0),
+        }
+      : null,
+  };
 }
