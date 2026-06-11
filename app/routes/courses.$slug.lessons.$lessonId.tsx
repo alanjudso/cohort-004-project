@@ -1334,7 +1334,7 @@ function DiscussionSection({
           No comments yet. Be the first to start the discussion.
         </p>
       ) : (
-        <ul className="space-y-4">
+        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {comments.map((c) => (
             <CommentItem
               key={c.id}
