@@ -28,6 +28,7 @@ import {
 import { computeResult } from "~/services/quizScoringService";
 import {
   createComment,
+  editComment,
   listCommentsForLesson,
   softDeleteComment,
 } from "~/services/commentService";
@@ -64,6 +65,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { cn, formatDuration } from "~/lib/utils";
+import { formatRelativeTime } from "~/lib/formatRelativeTime";
+import { UserAvatar } from "~/components/user-avatar";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
@@ -420,6 +423,23 @@ export async function action({ params, request }: Route.ActionArgs) {
       const message =
         err instanceof Error ? err.message : "Failed to create comment";
       return { commentError: message };
+    }
+    return { success: true };
+  }
+
+  if (intent === "edit-comment") {
+    const commentId = Number(formData.get("commentId"));
+    if (isNaN(commentId)) {
+      throw data("Invalid comment ID", { status: 400 });
+    }
+    const content = String(formData.get("content") ?? "");
+    const result = editComment({
+      commentId,
+      actingUserId: currentUserId,
+      content,
+    });
+    if (!result.ok) {
+      return { commentError: result.error };
     }
     return { success: true };
   }
@@ -1185,10 +1205,9 @@ function QuizSection({
 // ─── Discussion ───
 
 const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+const CLAMP_LINES = 6;
 
 function renderCommentContent(text: string) {
-  // Plain text; auto-linkify URLs. Split-and-map keeps React responsible for escaping,
-  // avoiding dangerouslySetInnerHTML.
   const parts = text.split(URL_RE);
   return parts.map((part, i) => {
     if (i % 2 === 1) {
@@ -1206,20 +1225,6 @@ function renderCommentContent(text: string) {
     }
     return <span key={i}>{part}</span>;
   });
-}
-
-function formatRelativeTime(iso: string) {
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  const diffSec = Math.max(1, Math.floor((now - then) / 1000));
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay}d ago`;
-  return new Date(iso).toLocaleDateString();
 }
 
 function DiscussionSection({
@@ -1247,7 +1252,6 @@ function DiscussionSection({
       ? (createFetcher.data as { commentError: string }).commentError
       : null;
 
-  // Clear textarea after successful submit
   useEffect(() => {
     if (
       createFetcher.state === "idle" &&
@@ -1256,6 +1260,7 @@ function DiscussionSection({
       createFetcher.data.success
     ) {
       setDraft("");
+      toast.success("Comment posted");
     }
   }, [createFetcher.state, createFetcher.data]);
 
@@ -1340,14 +1345,47 @@ function CommentItem({
   const deleteFetcher = useFetcher({
     key: `comment-delete-${comment.id}`,
   });
+  const editFetcher = useFetcher({
+    key: `comment-edit-${comment.id}`,
+  });
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(comment.content);
+  const [expanded, setExpanded] = useState(false);
+
   const isDeleting =
     deleteFetcher.state !== "idle" &&
     deleteFetcher.formData?.get("intent") === "delete-comment";
+  const isEditing =
+    editFetcher.state !== "idle" &&
+    editFetcher.formData?.get("intent") === "edit-comment";
+
+  const editError =
+    typeof editFetcher.data === "object" &&
+    editFetcher.data !== null &&
+    "commentError" in editFetcher.data
+      ? (editFetcher.data as { commentError: string }).commentError
+      : null;
+
+  useEffect(() => {
+    if (
+      editFetcher.state === "idle" &&
+      editFetcher.data &&
+      "success" in editFetcher.data &&
+      editFetcher.data.success
+    ) {
+      setEditing(false);
+      toast.success("Comment updated");
+    }
+  }, [editFetcher.state, editFetcher.data]);
 
   const isDeleted = comment.deletedAt !== null;
-  const canDelete =
-    !isDeleted &&
-    (comment.userId === currentUserId || isCourseInstructor || isAdmin);
+  const isOwner = comment.userId === currentUserId;
+  const canDelete = !isDeleted && (isOwner || isCourseInstructor || isAdmin);
+  const canEdit = !isDeleted && isOwner;
+  const isEdited = comment.updatedAt !== null;
+
+  const editRemaining = COMMENT_MAX_LENGTH - editDraft.length;
+  const showEditCounter = editRemaining <= 200;
 
   return (
     <li
@@ -1358,6 +1396,11 @@ function CommentItem({
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm">
+          <UserAvatar
+            name={comment.authorName}
+            avatarUrl={comment.authorAvatarUrl}
+            className="size-6"
+          />
           <span className="font-medium">{comment.authorName}</span>
           {isInstructorAuthor && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
@@ -1367,30 +1410,111 @@ function CommentItem({
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(comment.createdAt)}
           </span>
+          {isEdited && !isDeleted && (
+            <span className="text-xs text-muted-foreground italic">
+              (edited)
+            </span>
+          )}
         </div>
-        {canDelete && (
-          <deleteFetcher.Form method="post">
-            <input type="hidden" name="intent" value="delete-comment" />
-            <input type="hidden" name="commentId" value={comment.id} />
-            <Button
-              type="submit"
-              variant="ghost"
-              size="sm"
-              disabled={isDeleting}
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </Button>
-          </deleteFetcher.Form>
+        {!editing && (canEdit || canDelete) && (
+          <div className="flex items-center gap-1">
+            {canEdit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => {
+                  setEditDraft(comment.content);
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </Button>
+            )}
+            {canDelete && (
+              <deleteFetcher.Form method="post">
+                <input type="hidden" name="intent" value="delete-comment" />
+                <input type="hidden" name="commentId" value={comment.id} />
+                <Button
+                  type="submit"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isDeleting}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                >
+                  {isDeleting ? "Deleting..." : "Delete"}
+                </Button>
+              </deleteFetcher.Form>
+            )}
+          </div>
         )}
       </div>
-      <div className="text-sm whitespace-pre-wrap break-words">
-        {isDeleted ? (
-          <span className="italic text-muted-foreground">[deleted]</span>
-        ) : (
-          renderCommentContent(comment.content)
-        )}
-      </div>
+
+      {editing ? (
+        <editFetcher.Form method="post">
+          <input type="hidden" name="intent" value="edit-comment" />
+          <input type="hidden" name="commentId" value={comment.id} />
+          <textarea
+            name="content"
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            maxLength={COMMENT_MAX_LENGTH}
+            rows={3}
+            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">
+              {showEditCounter && (
+                <span className={editRemaining < 0 ? "text-destructive" : ""}>
+                  {editRemaining} characters remaining
+                </span>
+              )}
+              {editError && (
+                <span className="text-destructive">{editError}</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isEditing || editDraft.trim().length === 0}
+              >
+                {isEditing ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </editFetcher.Form>
+      ) : (
+        <div className="text-sm whitespace-pre-wrap break-words">
+          {isDeleted ? (
+            <span className="italic text-muted-foreground">[deleted]</span>
+          ) : (
+            <>
+              <div className={cn(!expanded && "line-clamp-[6]")}>
+                {renderCommentContent(comment.content)}
+              </div>
+              {!expanded &&
+                comment.content.split("\n").length > CLAMP_LINES && (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(true)}
+                    className="mt-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    Show more
+                  </button>
+                )}
+            </>
+          )}
+        </div>
+      )}
     </li>
   );
 }

@@ -273,6 +273,7 @@ export const lessonComments = sqliteTable("lesson_comments", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at"),
   deletedAt: text("deleted_at"),
 });
 

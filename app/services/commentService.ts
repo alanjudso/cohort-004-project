@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
   lessonComments,
@@ -11,10 +11,6 @@ import {
 
 import { COMMENT_MAX_LENGTH } from "./commentConstants";
 
-// ─── Comment Service ───
-// Lesson discussion comments. Flat list, soft delete, plain text.
-// Uses positional parameters (project convention).
-
 export { COMMENT_MAX_LENGTH };
 
 export type CommentWithAuthor = {
@@ -23,15 +19,14 @@ export type CommentWithAuthor = {
   userId: number;
   content: string;
   createdAt: string;
+  updatedAt: string | null;
   deletedAt: string | null;
   authorName: string;
   authorAvatarUrl: string | null;
   authorRole: UserRole;
 };
 
-export function listCommentsForLesson(
-  lessonId: number
-): CommentWithAuthor[] {
+export function listCommentsForLesson(lessonId: number): CommentWithAuthor[] {
   return db
     .select({
       id: lessonComments.id,
@@ -39,6 +34,7 @@ export function listCommentsForLesson(
       userId: lessonComments.userId,
       content: lessonComments.content,
       createdAt: lessonComments.createdAt,
+      updatedAt: lessonComments.updatedAt,
       deletedAt: lessonComments.deletedAt,
       authorName: users.name,
       authorAvatarUrl: users.avatarUrl,
@@ -47,7 +43,7 @@ export function listCommentsForLesson(
     .from(lessonComments)
     .innerJoin(users, eq(users.id, lessonComments.userId))
     .where(eq(lessonComments.lessonId, lessonId))
-    .orderBy(asc(lessonComments.createdAt))
+    .orderBy(desc(lessonComments.createdAt))
     .all() as CommentWithAuthor[];
 }
 
@@ -79,10 +75,6 @@ export function getCommentById(id: number) {
     .get();
 }
 
-/**
- * Returns the instructor id of the course that owns the given lesson.
- * Used to authorize comment deletion.
- */
 export function getInstructorIdForLesson(lessonId: number): number | null {
   const row = db
     .select({ instructorId: courses.instructorId })
@@ -94,10 +86,39 @@ export function getInstructorIdForLesson(lessonId: number): number | null {
   return row?.instructorId ?? null;
 }
 
-/**
- * Soft deletes a comment. Returns null if not authorized or not found.
- * Allowed for: comment author, the lesson's course instructor, or any admin.
- */
+export function editComment(opts: {
+  commentId: number;
+  actingUserId: number;
+  content: string;
+}):
+  | { ok: true; data: typeof lessonComments.$inferSelect }
+  | { ok: false; error: string } {
+  const comment = getCommentById(opts.commentId);
+  if (!comment) return { ok: false, error: "Comment not found" };
+  if (comment.deletedAt)
+    return { ok: false, error: "Cannot edit a deleted comment" };
+  if (comment.userId !== opts.actingUserId)
+    return { ok: false, error: "Not authorized to edit this comment" };
+
+  const trimmed = opts.content.trim();
+  if (trimmed.length === 0)
+    return { ok: false, error: "Comment cannot be empty" };
+  if (trimmed.length > COMMENT_MAX_LENGTH)
+    return {
+      ok: false,
+      error: `Comment exceeds ${COMMENT_MAX_LENGTH} characters`,
+    };
+
+  const updated = db
+    .update(lessonComments)
+    .set({ content: trimmed, updatedAt: new Date().toISOString() })
+    .where(eq(lessonComments.id, opts.commentId))
+    .returning()
+    .get();
+
+  return { ok: true, data: updated };
+}
+
 export function softDeleteComment(
   commentId: number,
   actingUserId: number,
@@ -109,9 +130,8 @@ export function softDeleteComment(
 
   const isAuthor = comment.userId === actingUserId;
   const isAdmin = actingUserRole === UserRole.Admin;
-  const instructorId = isAuthor || isAdmin
-    ? null
-    : getInstructorIdForLesson(comment.lessonId);
+  const instructorId =
+    isAuthor || isAdmin ? null : getInstructorIdForLesson(comment.lessonId);
   const isInstructor = instructorId === actingUserId;
 
   if (!isAuthor && !isAdmin && !isInstructor) {

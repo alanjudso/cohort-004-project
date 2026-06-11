@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
+import { eq } from "drizzle-orm";
 import * as schema from "~/db/schema";
 
 let testDb: ReturnType<typeof createTestDb>;
@@ -14,6 +15,7 @@ vi.mock("~/db", () => ({
 import {
   listCommentsForLesson,
   createComment,
+  editComment,
   softDeleteComment,
   COMMENT_MAX_LENGTH,
 } from "./commentService";
@@ -51,14 +53,26 @@ describe("commentService", () => {
   });
 
   describe("listCommentsForLesson", () => {
-    it("returns comments oldest-first with author info", () => {
+    it("returns comments newest-first with author info", () => {
       const a = createComment(lessonId, base.user.id, "first");
+      testDb
+        .update(schema.lessonComments)
+        .set({ createdAt: "2026-01-01T00:00:00Z" })
+        .where(eq(schema.lessonComments.id, a.id))
+        .run();
       const b = createComment(lessonId, base.instructor.id, "second");
 
       const list = listCommentsForLesson(lessonId);
-      expect(list.map((c) => c.id)).toEqual([a.id, b.id]);
-      expect(list[0].authorName).toBe(base.user.name);
-      expect(list[1].authorRole).toBe(schema.UserRole.Instructor);
+      expect(list.map((c) => c.id)).toEqual([b.id, a.id]);
+      expect(list[1].authorName).toBe(base.user.name);
+      expect(list[0].authorRole).toBe(schema.UserRole.Instructor);
+    });
+
+    it("includes updatedAt field", () => {
+      createComment(lessonId, base.user.id, "hello");
+      const list = listCommentsForLesson(lessonId);
+      expect(list[0]).toHaveProperty("updatedAt");
+      expect(list[0].updatedAt).toBeNull();
     });
 
     it("includes soft-deleted comments (renderable as [deleted])", () => {
@@ -70,10 +84,96 @@ describe("commentService", () => {
     });
   });
 
+  describe("editComment", () => {
+    it("lets author edit their own comment", () => {
+      const c = createComment(lessonId, base.user.id, "original");
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.user.id,
+        content: "updated",
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.content).toBe("updated");
+        expect(result.data.updatedAt).not.toBeNull();
+      }
+    });
+
+    it("trims whitespace on edit", () => {
+      const c = createComment(lessonId, base.user.id, "original");
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.user.id,
+        content: "  trimmed  ",
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.content).toBe("trimmed");
+      }
+    });
+
+    it("refuses edit by non-author", () => {
+      const c = createComment(lessonId, base.user.id, "mine");
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.instructor.id,
+        content: "hijack",
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain("Not authorized");
+      }
+    });
+
+    it("refuses edit on deleted comment", () => {
+      const c = createComment(lessonId, base.user.id, "doomed");
+      softDeleteComment(c.id, base.user.id, schema.UserRole.Student);
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.user.id,
+        content: "revive",
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects empty content", () => {
+      const c = createComment(lessonId, base.user.id, "original");
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.user.id,
+        content: "   ",
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects content over the limit", () => {
+      const c = createComment(lessonId, base.user.id, "original");
+      const result = editComment({
+        commentId: c.id,
+        actingUserId: base.user.id,
+        content: "a".repeat(COMMENT_MAX_LENGTH + 1),
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("returns error for unknown comment", () => {
+      const result = editComment({
+        commentId: 999999,
+        actingUserId: base.user.id,
+        content: "ghost",
+      });
+      expect(result.ok).toBe(false);
+    });
+  });
+
   describe("softDeleteComment", () => {
     it("lets author delete own comment", () => {
       const c = createComment(lessonId, base.user.id, "mine");
-      const res = softDeleteComment(c.id, base.user.id, schema.UserRole.Student);
+      const res = softDeleteComment(
+        c.id,
+        base.user.id,
+        schema.UserRole.Student
+      );
       expect(res?.deletedAt).not.toBeNull();
     });
 
@@ -118,7 +218,11 @@ describe("commentService", () => {
     });
 
     it("returns null for unknown comment", () => {
-      const res = softDeleteComment(999999, base.user.id, schema.UserRole.Student);
+      const res = softDeleteComment(
+        999999,
+        base.user.id,
+        schema.UserRole.Student
+      );
       expect(res).toBeNull();
     });
   });
