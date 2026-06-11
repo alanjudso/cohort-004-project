@@ -39,7 +39,10 @@ import {
 import type { CommentWithAuthor } from "~/services/commentService";
 import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
 import { getUserById } from "~/services/userService";
-import { LessonProgressStatus, UserRole } from "~/db/schema";
+import { awardXp } from "~/services/xpService";
+import { recordStreakActivity } from "~/services/streakService";
+import { getAttemptsByUser } from "~/services/quizService";
+import { LessonProgressStatus, UserRole, XpSourceType } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -344,6 +347,13 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "mark-complete") {
     markLessonComplete(currentUserId, lessonId);
+    awardXp({
+      userId: currentUserId,
+      amount: 10,
+      sourceType: XpSourceType.LessonComplete,
+      sourceId: lessonId,
+    });
+    recordStreakActivity(currentUserId);
     return { success: true };
   }
 
@@ -373,9 +383,21 @@ export async function action({ params, request }: Route.ActionArgs) {
       }
     }
 
+    const previousAttempts = getAttemptsByUser(currentUserId, quizId);
+    const hadPriorPass = previousAttempts.some((a) => a.passed);
+
     const result = computeResult(currentUserId, quizId, selectedAnswers);
     if (!result) {
       throw data("Failed to score quiz", { status: 500 });
+    }
+
+    if (result.passed && !hadPriorPass) {
+      awardXp({
+        userId: currentUserId,
+        amount: 5,
+        sourceType: XpSourceType.QuizPass,
+        sourceId: quizId,
+      });
     }
 
     return { quizResult: result };

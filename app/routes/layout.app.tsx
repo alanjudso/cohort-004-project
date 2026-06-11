@@ -18,6 +18,9 @@ import {
   getUnreadCount,
 } from "~/services/notificationService";
 import { UserRole } from "~/db/schema";
+import { getTotalXp } from "~/services/xpService";
+import { getStreakData } from "~/services/streakService";
+import { getLevelFromXp } from "~/lib/leveling";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
@@ -51,6 +54,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
+  const isStudent = currentUser?.role === UserRole.Student;
+  const gamification =
+    isStudent && currentUserId
+      ? (() => {
+          const totalXp = getTotalXp(currentUserId);
+          const levelInfo = getLevelFromXp(totalXp);
+          const streakData = getStreakData(currentUserId);
+          return { totalXp, ...levelInfo, ...streakData };
+        })()
+      : null;
+
   const isInstructor = currentUser?.role === UserRole.Instructor;
   const userIsTeamAdmin = currentUserId ? isTeamAdmin(currentUserId) : false;
   const shouldFetchNotifications =
@@ -79,6 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     isTeamAdmin: userIsTeamAdmin,
     notifications,
     unreadCount,
+    gamification,
   };
 }
 
@@ -93,6 +108,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     isTeamAdmin: userIsTeamAdmin,
     notifications,
     unreadCount,
+    gamification,
   } = loaderData;
 
   return (
@@ -103,6 +119,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
         isTeamAdmin={userIsTeamAdmin}
         notifications={notifications}
         unreadCount={unreadCount}
+        gamification={gamification}
       />
       <main className="flex-1 overflow-y-auto">
         <Outlet />

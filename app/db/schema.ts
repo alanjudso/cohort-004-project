@@ -304,6 +304,35 @@ export const notifications = sqliteTable("notifications", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export enum XpSourceType {
+  LessonComplete = "lesson_complete",
+  QuizPass = "quiz_pass",
+}
+
+export const xpEvents = sqliteTable("xp_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  amount: integer("amount").notNull(),
+  sourceType: text("source_type").notNull().$type<XpSourceType>(),
+  sourceId: integer("source_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const streakActivities = sqliteTable("streak_activities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  activityDate: text("activity_date").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const videoWatchEvents = sqliteTable("video_watch_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
