@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
-import { XpSourceType } from "~/db/schema";
+import {
+  XpSourceType,
+  LessonProgressStatus,
+  modules,
+  lessons,
+  lessonProgress,
+} from "~/db/schema";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -11,7 +17,7 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { awardXp, getTotalXp } from "./xpService";
+import { awardXp, getTotalXp, checkModuleCompleted } from "./xpService";
 
 beforeEach(() => {
   testDb = createTestDb();
@@ -107,6 +113,130 @@ describe("xpService", () => {
         sourceId: 3,
       });
       expect(getTotalXp(base.user.id)).toBe(25);
+    });
+  });
+
+  describe("checkModuleCompleted", () => {
+    function createModuleWithLessons(count: number) {
+      const mod = testDb
+        .insert(modules)
+        .values({ courseId: base.course.id, title: "Test Module", position: 1 })
+        .returning()
+        .get();
+
+      const created = [];
+      for (let i = 0; i < count; i++) {
+        const lesson = testDb
+          .insert(lessons)
+          .values({
+            moduleId: mod.id,
+            title: `Lesson ${i + 1}`,
+            position: i + 1,
+          })
+          .returning()
+          .get();
+        created.push(lesson);
+      }
+      return { mod, lessons: created };
+    }
+
+    it("returns not completed when no lessons exist", () => {
+      const mod = testDb
+        .insert(modules)
+        .values({
+          courseId: base.course.id,
+          title: "Empty Module",
+          position: 1,
+        })
+        .returning()
+        .get();
+
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(false);
+      expect(result.lessonCount).toBe(0);
+      expect(result.totalXp).toBe(0);
+    });
+
+    it("returns not completed when no lessons are completed", () => {
+      const { mod } = createModuleWithLessons(3);
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(false);
+      expect(result.lessonCount).toBe(3);
+      expect(result.totalXp).toBe(30);
+    });
+
+    it("returns not completed when only some lessons are completed", () => {
+      const { mod, lessons: moduleLessons } = createModuleWithLessons(3);
+      testDb
+        .insert(lessonProgress)
+        .values({
+          userId: base.user.id,
+          lessonId: moduleLessons[0].id,
+          status: LessonProgressStatus.Completed,
+        })
+        .run();
+
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(false);
+    });
+
+    it("returns completed when all lessons are completed", () => {
+      const { mod, lessons: moduleLessons } = createModuleWithLessons(4);
+      for (const lesson of moduleLessons) {
+        testDb
+          .insert(lessonProgress)
+          .values({
+            userId: base.user.id,
+            lessonId: lesson.id,
+            status: LessonProgressStatus.Completed,
+          })
+          .run();
+      }
+
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(true);
+      expect(result.lessonCount).toBe(4);
+      expect(result.totalXp).toBe(40);
+    });
+
+    it("does not count in-progress lessons as completed", () => {
+      const { mod, lessons: moduleLessons } = createModuleWithLessons(2);
+      testDb
+        .insert(lessonProgress)
+        .values({
+          userId: base.user.id,
+          lessonId: moduleLessons[0].id,
+          status: LessonProgressStatus.Completed,
+        })
+        .run();
+      testDb
+        .insert(lessonProgress)
+        .values({
+          userId: base.user.id,
+          lessonId: moduleLessons[1].id,
+          status: LessonProgressStatus.InProgress,
+        })
+        .run();
+
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(false);
+    });
+
+    it("is scoped to the specific user", () => {
+      const { mod, lessons: moduleLessons } = createModuleWithLessons(2);
+      for (const lesson of moduleLessons) {
+        testDb
+          .insert(lessonProgress)
+          .values({
+            userId: base.instructor.id,
+            lessonId: lesson.id,
+            status: LessonProgressStatus.Completed,
+          })
+          .run();
+      }
+
+      const result = checkModuleCompleted(base.user.id, mod.id);
+      expect(result.completed).toBe(false);
     });
   });
 });

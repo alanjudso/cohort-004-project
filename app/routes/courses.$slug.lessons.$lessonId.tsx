@@ -40,7 +40,7 @@ import {
 import type { CommentWithAuthor } from "~/services/commentService";
 import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
 import { getUserById } from "~/services/userService";
-import { awardXp } from "~/services/xpService";
+import { awardXp, checkModuleCompleted } from "~/services/xpService";
 import { recordStreakActivity } from "~/services/streakService";
 import { getAttemptsByUser } from "~/services/quizService";
 import { LessonProgressStatus, UserRole, XpSourceType } from "~/db/schema";
@@ -357,6 +357,22 @@ export async function action({ params, request }: Route.ActionArgs) {
       sourceId: lessonId,
     });
     recordStreakActivity(currentUserId);
+
+    const lesson = getLessonById(lessonId);
+    if (lesson) {
+      const moduleResult = checkModuleCompleted(currentUserId, lesson.moduleId);
+      if (moduleResult.completed) {
+        const mod = getModuleById(lesson.moduleId);
+        return {
+          success: true,
+          moduleCompleted: {
+            moduleTitle: mod?.title ?? "Module",
+            totalXp: moduleResult.totalXp,
+          },
+        };
+      }
+    }
+
     return { success: true };
   }
 
@@ -535,16 +551,25 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     fetcher.formData?.get("intent") === "mark-complete";
 
   const justCompleted = fetcher.data?.success;
+  const moduleCompleted = fetcher.data?.moduleCompleted as
+    | { moduleTitle: string; totalXp: number }
+    | undefined;
 
   const isCompleted =
     lessonStatus === LessonProgressStatus.Completed || justCompleted;
 
-  // Navigate to next lesson after marking complete
   useEffect(() => {
-    if (justCompleted && nextLesson) {
-      navigate(`/courses/${course.slug}/lessons/${nextLesson.id}`);
+    if (justCompleted) {
+      if (moduleCompleted) {
+        toast.success(
+          `Module complete: ${moduleCompleted.moduleTitle}! +${moduleCompleted.totalXp} XP earned`
+        );
+      }
+      if (nextLesson) {
+        navigate(`/courses/${course.slug}/lessons/${nextLesson.id}`);
+      }
     }
-  }, [justCompleted, nextLesson, course.slug, navigate]);
+  }, [justCompleted, moduleCompleted, nextLesson, course.slug, navigate]);
 
   const quizResult = quizFetcher.data?.quizResult ?? null;
   const isSubmittingQuiz = quizFetcher.state !== "idle";
