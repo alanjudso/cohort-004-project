@@ -38,6 +38,10 @@ export default [
       "instructor/:courseId/students",
       "routes/instructor.$courseId.students.tsx"
     ),
+    route(
+      "instructor/:courseId/analytics",
+      "routes/instructor.$courseId.analytics.tsx"
+    ),
     route("admin/analytics", "routes/admin.analytics.tsx"),
     route("admin/users", "routes/admin.users.tsx"),
     route("admin/courses", "routes/admin.courses.tsx"),

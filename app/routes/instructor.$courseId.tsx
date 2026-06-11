@@ -33,7 +33,10 @@ import {
   reorderLessons,
   moveLessonToModule,
 } from "~/services/lessonService";
-import { getEnrollmentCountForCourse, getCourseEnrolledStudents } from "~/services/enrollmentService";
+import {
+  getEnrollmentCountForCourse,
+  getCourseEnrolledStudents,
+} from "~/services/enrollmentService";
 import { calculateProgress } from "~/services/progressService";
 import { getQuizByLessonId, getBestAttempt } from "~/services/quizService";
 import { getCurrentUserId } from "~/lib/session";
@@ -67,6 +70,7 @@ import {
   Users,
   AlertTriangle,
   Award,
+  BarChart3,
   Globe,
   FileText,
 } from "lucide-react";
@@ -79,21 +83,66 @@ const courseEditorParamsSchema = z.object({
 });
 
 const courseEditorActionSchema = z.discriminatedUnion("intent", [
-  z.object({ intent: z.literal("update-title"), title: z.string().trim().min(1, "Title cannot be empty.") }),
-  z.object({ intent: z.literal("update-description"), description: z.string().trim().min(1, "Description cannot be empty.") }),
-  z.object({ intent: z.literal("update-status"), status: z.nativeEnum(CourseStatus) }),
+  z.object({
+    intent: z.literal("update-title"),
+    title: z.string().trim().min(1, "Title cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("update-description"),
+    description: z.string().trim().min(1, "Description cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("update-status"),
+    status: z.nativeEnum(CourseStatus),
+  }),
   z.object({ intent: z.literal("update-price"), price: z.string() }),
   z.object({ intent: z.literal("update-ppp-enabled"), pppEnabled: z.string() }),
-  z.object({ intent: z.literal("add-module"), title: z.string().trim().min(1, "Module title cannot be empty.") }),
-  z.object({ intent: z.literal("rename-module"), moduleId: z.coerce.number().int(), title: z.string().trim().min(1, "Module title cannot be empty.") }),
-  z.object({ intent: z.literal("delete-module"), moduleId: z.coerce.number().int() }),
-  z.object({ intent: z.literal("add-lesson"), moduleId: z.coerce.number().int(), title: z.string().trim().min(1, "Lesson title cannot be empty.") }),
-  z.object({ intent: z.literal("rename-lesson"), lessonId: z.coerce.number().int(), title: z.string().trim().min(1, "Lesson title cannot be empty.") }),
-  z.object({ intent: z.literal("reorder-modules"), moduleIds: z.string().min(1, "Missing module IDs.") }),
-  z.object({ intent: z.literal("reorder-lessons"), moduleId: z.coerce.number().int(), lessonIds: z.string().min(1, "Missing lesson IDs.") }),
-  z.object({ intent: z.literal("move-lesson"), lessonId: z.coerce.number().int(), targetModuleId: z.coerce.number().int(), targetPosition: z.coerce.number().int() }),
-  z.object({ intent: z.literal("delete-lesson"), lessonId: z.coerce.number().int() }),
-  z.object({ intent: z.literal("update-sales-copy"), salesCopy: z.string().optional() }),
+  z.object({
+    intent: z.literal("add-module"),
+    title: z.string().trim().min(1, "Module title cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("rename-module"),
+    moduleId: z.coerce.number().int(),
+    title: z.string().trim().min(1, "Module title cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("delete-module"),
+    moduleId: z.coerce.number().int(),
+  }),
+  z.object({
+    intent: z.literal("add-lesson"),
+    moduleId: z.coerce.number().int(),
+    title: z.string().trim().min(1, "Lesson title cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("rename-lesson"),
+    lessonId: z.coerce.number().int(),
+    title: z.string().trim().min(1, "Lesson title cannot be empty."),
+  }),
+  z.object({
+    intent: z.literal("reorder-modules"),
+    moduleIds: z.string().min(1, "Missing module IDs."),
+  }),
+  z.object({
+    intent: z.literal("reorder-lessons"),
+    moduleId: z.coerce.number().int(),
+    lessonIds: z.string().min(1, "Missing lesson IDs."),
+  }),
+  z.object({
+    intent: z.literal("move-lesson"),
+    lessonId: z.coerce.number().int(),
+    targetModuleId: z.coerce.number().int(),
+    targetPosition: z.coerce.number().int(),
+  }),
+  z.object({
+    intent: z.literal("delete-lesson"),
+    lessonId: z.coerce.number().int(),
+  }),
+  z.object({
+    intent: z.literal("update-sales-copy"),
+    salesCopy: z.string().optional(),
+  }),
 ]);
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
@@ -115,7 +164,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const user = getUserById(currentUserId);
 
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
     throw data("Only instructors and admins can access this page.", {
       status: 403,
     });
@@ -144,7 +196,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   // Gather all lessons from the course modules and find which have quizzes
   const allCourseLessons = course.modules.flatMap((mod) => mod.lessons);
-  const lessonQuizzes: { lessonId: number; lessonTitle: string; quizId: number; quizTitle: string }[] = [];
+  const lessonQuizzes: {
+    lessonId: number;
+    lessonTitle: string;
+    quizId: number;
+    quizTitle: string;
+  }[] = [];
   for (const lesson of allCourseLessons) {
     const quiz = getQuizByLessonId(lesson.id);
     if (quiz) {
@@ -159,7 +216,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const students = enrolledStudents.map((enrollment) => {
     const studentUser = getUserById(enrollment.userId);
-    const progress = calculateProgress(enrollment.userId, courseId, false, false);
+    const progress = calculateProgress(
+      enrollment.userId,
+      courseId,
+      false,
+      false
+    );
 
     const quizScores = lessonQuizzes.map((lq) => {
       const bestAttempt = getBestAttempt(enrollment.userId, lq.quizId);
@@ -196,8 +258,13 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const user = getUserById(currentUserId);
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
-    throw data("Only instructors and admins can edit courses.", { status: 403 });
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
+    throw data("Only instructors and admins can edit courses.", {
+      status: 403,
+    });
   }
 
   const { courseId } = parseParams(params, courseEditorParamsSchema);
@@ -215,7 +282,10 @@ export async function action({ params, request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, courseEditorActionSchema);
 
   if (!parsed.success) {
-    return data({ error: Object.values(parsed.errors)[0] ?? "Invalid input." }, { status: 400 });
+    return data(
+      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
+      { status: 400 }
+    );
   }
 
   const { intent } = parsed.data;
@@ -238,7 +308,10 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (intent === "update-price") {
     const priceDollars = parseFloat(parsed.data.price);
     if (isNaN(priceDollars) || priceDollars < 0) {
-      return data({ error: "Price must be a non-negative number." }, { status: 400 });
+      return data(
+        { error: "Price must be a non-negative number." },
+        { status: 400 }
+      );
     }
     if (priceDollars > 9999.99) {
       return data({ error: "Price cannot exceed $9,999.99." }, { status: 400 });
@@ -263,7 +336,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const { moduleId, title } = parsed.data;
     const mod = getModuleById(moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Module not found in this course." }, { status: 404 });
+      return data(
+        { error: "Module not found in this course." },
+        { status: 404 }
+      );
     }
     updateModuleTitle(moduleId, title);
     return { success: true, field: "module" };
@@ -273,7 +349,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const { moduleId } = parsed.data;
     const mod = getModuleById(moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Module not found in this course." }, { status: 404 });
+      return data(
+        { error: "Module not found in this course." },
+        { status: 404 }
+      );
     }
     deleteModule(moduleId);
     return { success: true, field: "module" };
@@ -283,7 +362,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const { moduleId, title } = parsed.data;
     const mod = getModuleById(moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Module not found in this course." }, { status: 404 });
+      return data(
+        { error: "Module not found in this course." },
+        { status: 404 }
+      );
     }
     createLesson(moduleId, title, null, null, null, null);
     return { success: true, field: "lesson" };
@@ -297,7 +379,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     const mod = getModuleById(lesson.moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Lesson not found in this course." }, { status: 404 });
+      return data(
+        { error: "Lesson not found in this course." },
+        { status: 404 }
+      );
     }
     updateLessonTitle(lessonId, title);
     return { success: true, field: "lesson" };
@@ -313,7 +398,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const { moduleId, lessonIds: lessonIdsJson } = parsed.data;
     const mod = getModuleById(moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Module not found in this course." }, { status: 404 });
+      return data(
+        { error: "Module not found in this course." },
+        { status: 404 }
+      );
     }
     const lessonIds: number[] = JSON.parse(lessonIdsJson);
     reorderLessons(moduleId, lessonIds);
@@ -328,11 +416,17 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     const sourceMod = getModuleById(lesson.moduleId);
     if (!sourceMod || sourceMod.courseId !== courseId) {
-      return data({ error: "Lesson not found in this course." }, { status: 404 });
+      return data(
+        { error: "Lesson not found in this course." },
+        { status: 404 }
+      );
     }
     const targetMod = getModuleById(targetModuleId);
     if (!targetMod || targetMod.courseId !== courseId) {
-      return data({ error: "Target module not found in this course." }, { status: 404 });
+      return data(
+        { error: "Target module not found in this course." },
+        { status: 404 }
+      );
     }
     moveLessonToModule(lessonId, targetModuleId, targetPosition);
     return { success: true, field: "lesson-move" };
@@ -346,7 +440,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     const mod = getModuleById(lesson.moduleId);
     if (!mod || mod.courseId !== courseId) {
-      return data({ error: "Lesson not found in this course." }, { status: 404 });
+      return data(
+        { error: "Lesson not found in this course." },
+        { status: 404 }
+      );
     }
     deleteLesson(lessonId);
     return { success: true, field: "lesson" };
@@ -614,7 +711,13 @@ function InlineEditableModuleTitle({
   );
 }
 
-function DeleteModuleButton({ moduleId, moduleTitle }: { moduleId: number; moduleTitle: string }) {
+function DeleteModuleButton({
+  moduleId,
+  moduleTitle,
+}: {
+  moduleId: number;
+  moduleTitle: string;
+}) {
   const [confirming, setConfirming] = useState(false);
   const fetcher = useFetcher();
 
@@ -630,7 +733,9 @@ function DeleteModuleButton({ moduleId, moduleTitle }: { moduleId: number; modul
   if (confirming) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-xs text-destructive">Delete "{moduleTitle}"?</span>
+        <span className="text-xs text-destructive">
+          Delete "{moduleTitle}"?
+        </span>
         <Button
           variant="destructive"
           size="sm"
@@ -828,7 +933,13 @@ function InlineEditableLessonTitle({
   );
 }
 
-function DeleteLessonButton({ lessonId, lessonTitle }: { lessonId: number; lessonTitle: string }) {
+function DeleteLessonButton({
+  lessonId,
+  lessonTitle,
+}: {
+  lessonId: number;
+  lessonTitle: string;
+}) {
   const [confirming, setConfirming] = useState(false);
   const fetcher = useFetcher();
 
@@ -950,7 +1061,12 @@ function AddLessonForm({ moduleId }: { moduleId: number }) {
         onKeyDown={handleKeyDown}
         className="max-w-xs text-sm"
       />
-      <Button size="sm" className="h-8" onClick={handleSubmit} disabled={!title.trim()}>
+      <Button
+        size="sm"
+        className="h-8"
+        onClick={handleSubmit}
+        disabled={!title.trim()}
+      >
         Add
       </Button>
       <Button
@@ -984,7 +1100,8 @@ function statusBadgeColor(status: string) {
 export default function InstructorCourseEditor({
   loaderData,
 }: Route.ComponentProps) {
-  const { course, lessonCount, enrollmentCount, students, quizCount } = loaderData;
+  const { course, lessonCount, enrollmentCount, students, quizCount } =
+    loaderData;
   const statusFetcher = useFetcher();
   const reorderFetcher = useFetcher();
   const lessonReorderFetcher = useFetcher();
@@ -1014,10 +1131,16 @@ export default function InstructorCourseEditor({
   }, [reorderFetcher.state, reorderFetcher.data]);
 
   useEffect(() => {
-    if (lessonReorderFetcher.state === "idle" && lessonReorderFetcher.data?.success) {
+    if (
+      lessonReorderFetcher.state === "idle" &&
+      lessonReorderFetcher.data?.success
+    ) {
       toast.success("Lessons reordered.");
     }
-    if (lessonReorderFetcher.state === "idle" && lessonReorderFetcher.data?.error) {
+    if (
+      lessonReorderFetcher.state === "idle" &&
+      lessonReorderFetcher.data?.error
+    ) {
       toast.error(lessonReorderFetcher.data.error);
     }
   }, [lessonReorderFetcher.state, lessonReorderFetcher.data]);
@@ -1083,8 +1206,14 @@ export default function InstructorCourseEditor({
         { method: "post" }
       );
     } else if (result.type === "lesson") {
-      const sourceModuleId = parseInt(result.source.droppableId.replace("lessons-", ""), 10);
-      const destModuleId = parseInt(result.destination.droppableId.replace("lessons-", ""), 10);
+      const sourceModuleId = parseInt(
+        result.source.droppableId.replace("lessons-", ""),
+        10
+      );
+      const destModuleId = parseInt(
+        result.destination.droppableId.replace("lessons-", ""),
+        10
+      );
 
       if (sourceModuleId === destModuleId) {
         // Reorder within the same module
@@ -1165,12 +1294,18 @@ export default function InstructorCourseEditor({
           </span>
           <span className="flex items-center gap-1.5">
             <Users className="size-4" />
-            {enrollmentCount}{" "}
-            {enrollmentCount === 1 ? "student" : "students"}
+            {enrollmentCount} {enrollmentCount === 1 ? "student" : "students"}
           </span>
           <span className="text-xs text-muted-foreground">
             Slug: /courses/{course.slug}
           </span>
+          <Link
+            to={`/instructor/${course.id}/analytics`}
+            className="ml-auto flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+          >
+            <BarChart3 className="size-4" />
+            Analytics
+          </Link>
         </div>
       </div>
 
@@ -1202,7 +1337,8 @@ export default function InstructorCourseEditor({
               <CardContent className="py-8 text-center">
                 <BookOpen className="mx-auto mb-3 size-8 text-muted-foreground/50" />
                 <p className="text-muted-foreground">
-                  No modules yet. Add your first module to start building content.
+                  No modules yet. Add your first module to start building
+                  content.
                 </p>
               </CardContent>
             </Card>
@@ -1277,75 +1413,85 @@ export default function InstructorCourseEditor({
                                         ref={lessonDropProvided.innerRef}
                                         {...lessonDropProvided.droppableProps}
                                       >
-                                        {mod.lessons.map((lesson, lessonIndex) => (
-                                          <Draggable
-                                            key={lesson.id}
-                                            draggableId={`lesson-${lesson.id}`}
-                                            index={lessonIndex}
-                                          >
-                                            {(lessonProvided, lessonSnapshot) => (
-                                              <li
-                                                ref={lessonProvided.innerRef}
-                                                {...lessonProvided.draggableProps}
-                                              >
-                                                <div
-                                                  className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm${
-                                                    lessonSnapshot.isDragging
-                                                      ? " bg-muted shadow-md ring-1 ring-primary/30"
-                                                      : ""
-                                                  }`}
+                                        {mod.lessons.map(
+                                          (lesson, lessonIndex) => (
+                                            <Draggable
+                                              key={lesson.id}
+                                              draggableId={`lesson-${lesson.id}`}
+                                              index={lessonIndex}
+                                            >
+                                              {(
+                                                lessonProvided,
+                                                lessonSnapshot
+                                              ) => (
+                                                <li
+                                                  ref={lessonProvided.innerRef}
+                                                  {...lessonProvided.draggableProps}
                                                 >
                                                   <div
-                                                    {...lessonProvided.dragHandleProps}
-                                                    className="cursor-grab active:cursor-grabbing rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                                    className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm${
+                                                      lessonSnapshot.isDragging
+                                                        ? " bg-muted shadow-md ring-1 ring-primary/30"
+                                                        : ""
+                                                    }`}
                                                   >
-                                                    <GripVertical className="size-4" />
-                                                  </div>
-                                                  <div className="flex-1">
-                                                    <InlineEditableLessonTitle
-                                                      value={lesson.title}
+                                                    <div
+                                                      {...lessonProvided.dragHandleProps}
+                                                      className="cursor-grab active:cursor-grabbing rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                                    >
+                                                      <GripVertical className="size-4" />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                      <InlineEditableLessonTitle
+                                                        value={lesson.title}
+                                                        lessonId={lesson.id}
+                                                      />
+                                                    </div>
+                                                    {lesson.durationMinutes && (
+                                                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                        <Clock className="size-3" />
+                                                        {formatDuration(
+                                                          lesson.durationMinutes,
+                                                          true,
+                                                          false,
+                                                          false
+                                                        )}
+                                                      </span>
+                                                    )}
+                                                    <Link
+                                                      to={`/courses/${course.slug}/lessons/${lesson.id}`}
+                                                      title="View lesson"
+                                                    >
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                      >
+                                                        <Eye className="size-3.5" />
+                                                      </Button>
+                                                    </Link>
+                                                    <Link
+                                                      to={`/instructor/${course.id}/lessons/${lesson.id}`}
+                                                      title="Edit lesson"
+                                                    >
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                      >
+                                                        <FileEdit className="size-3.5" />
+                                                      </Button>
+                                                    </Link>
+                                                    <DeleteLessonButton
                                                       lessonId={lesson.id}
+                                                      lessonTitle={lesson.title}
                                                     />
                                                   </div>
-                                                  {lesson.durationMinutes && (
-                                                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                      <Clock className="size-3" />
-                                                      {formatDuration(lesson.durationMinutes, true, false, false)}
-                                                    </span>
-                                                  )}
-                                                  <Link
-                                                    to={`/courses/${course.slug}/lessons/${lesson.id}`}
-                                                    title="View lesson"
-                                                  >
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="sm"
-                                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                                    >
-                                                      <Eye className="size-3.5" />
-                                                    </Button>
-                                                  </Link>
-                                                  <Link
-                                                    to={`/instructor/${course.id}/lessons/${lesson.id}`}
-                                                    title="Edit lesson"
-                                                  >
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="sm"
-                                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                                    >
-                                                      <FileEdit className="size-3.5" />
-                                                    </Button>
-                                                  </Link>
-                                                  <DeleteLessonButton
-                                                    lessonId={lesson.id}
-                                                    lessonTitle={lesson.title}
-                                                  />
-                                                </div>
-                                              </li>
-                                            )}
-                                          </Draggable>
-                                        ))}
+                                                </li>
+                                              )}
+                                            </Draggable>
+                                          )
+                                        )}
                                         {lessonDropProvided.placeholder}
                                       </ul>
                                     )}
@@ -1417,7 +1563,11 @@ export default function InstructorCourseEditor({
                         className="w-28"
                         onBlur={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val) && val >= 0 && Math.round(val * 100) !== course.price) {
+                          if (
+                            !isNaN(val) &&
+                            val >= 0 &&
+                            Math.round(val * 100) !== course.price
+                          ) {
                             priceFetcher.submit(
                               { intent: "update-price", price: e.target.value },
                               { method: "post" }
@@ -1433,7 +1583,10 @@ export default function InstructorCourseEditor({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2" title="Purchasing Power Parity: applies location-based discounts for students in lower-income countries">
+                  <div
+                    className="flex items-center gap-2"
+                    title="Purchasing Power Parity: applies location-based discounts for students in lower-income countries"
+                  >
                     <Globe className="size-4 text-muted-foreground" />
                     <span className="text-sm font-medium">PPP:</span>
                     <button
@@ -1443,7 +1596,10 @@ export default function InstructorCourseEditor({
                       }`}
                       onClick={() => {
                         pppFetcher.submit(
-                          { intent: "update-ppp-enabled", pppEnabled: String(!course.pppEnabled) },
+                          {
+                            intent: "update-ppp-enabled",
+                            pppEnabled: String(!course.pppEnabled),
+                          },
                           { method: "post" }
                         );
                       }}
@@ -1486,7 +1642,8 @@ export default function InstructorCourseEditor({
             <CardHeader>
               <h2 className="text-lg font-semibold">Sales Copy</h2>
               <p className="text-sm text-muted-foreground">
-                Write the course sales copy in Markdown. This is shown on the public course page. Press Ctrl+S to format and save.
+                Write the course sales copy in Markdown. This is shown on the
+                public course page. Press Ctrl+S to format and save.
               </p>
             </CardHeader>
             <CardContent>
@@ -1498,10 +1655,14 @@ export default function InstructorCourseEditor({
               <div className="mt-4 flex items-center gap-4">
                 <Button
                   onClick={handleSalesCopySave}
-                  disabled={!salesCopyHasChanges || salesCopyFetcher.state !== "idle"}
+                  disabled={
+                    !salesCopyHasChanges || salesCopyFetcher.state !== "idle"
+                  }
                 >
                   <Save className="mr-1.5 size-4" />
-                  {salesCopyFetcher.state !== "idle" ? "Saving..." : "Save Sales Copy"}
+                  {salesCopyFetcher.state !== "idle"
+                    ? "Saving..."
+                    : "Save Sales Copy"}
                 </Button>
                 {salesCopyHasChanges && (
                   <span className="text-sm text-muted-foreground">
@@ -1518,7 +1679,8 @@ export default function InstructorCourseEditor({
           <div className="mb-4 flex items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <Users className="size-4" />
-              {students.length} {students.length === 1 ? "student" : "students"} enrolled
+              {students.length} {students.length === 1 ? "student" : "students"}{" "}
+              enrolled
             </span>
             {quizCount > 0 && (
               <span className="flex items-center gap-1.5">
@@ -1599,7 +1761,9 @@ export default function InstructorCourseEditor({
                                     style={{ width: `${student.progress}%` }}
                                   />
                                 </div>
-                                <span className="text-sm font-medium">{student.progress}%</span>
+                                <span className="text-sm font-medium">
+                                  {student.progress}%
+                                </span>
                               </div>
                             </td>
                             <td className="px-4 py-3">
@@ -1627,7 +1791,9 @@ export default function InstructorCourseEditor({
                                       title={`${qs.quizTitle} (${qs.lessonTitle})`}
                                     >
                                       {qs.bestScore === null ? (
-                                        <span className="text-xs text-muted-foreground">—</span>
+                                        <span className="text-xs text-muted-foreground">
+                                          —
+                                        </span>
                                       ) : qs.passed ? (
                                         <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
                                           {Math.round(qs.bestScore * 100)}%
@@ -1664,13 +1830,20 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
       title = "Course not found";
-      message = "The course you're looking for doesn't exist or may have been removed.";
+      message =
+        "The course you're looking for doesn't exist or may have been removed.";
     } else if (error.status === 401) {
       title = "Sign in required";
-      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
-      message = typeof error.data === "string" ? error.data : "You don't have permission to edit this course.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "You don't have permission to edit this course.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

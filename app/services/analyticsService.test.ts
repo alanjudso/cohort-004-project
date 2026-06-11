@@ -17,6 +17,10 @@ import {
   getPerCourseBreakdown,
   getAdminAnalyticsSummary,
   getAdminRevenueTimeSeries,
+  getCourseEarnings,
+  getCourseCompletionRate,
+  getDropOffLessons,
+  getQuizPerformance,
   type TimePeriod,
 } from "./analyticsService";
 
@@ -899,6 +903,410 @@ describe("analyticsService", () => {
 
       const purchaseDay = result.find((p) => p.revenue > 0);
       expect(purchaseDay?.revenue).toBe(4999);
+    });
+  });
+
+  // ─── Per-Course: Earnings ───
+
+  describe("getCourseEarnings", () => {
+    it("returns total and monthly breakdown", () => {
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+            createdAt: "2026-01-15T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 2500,
+            country: "BR",
+            createdAt: "2026-02-10T10:00:00.000Z",
+          },
+        ])
+        .run();
+
+      const result = getCourseEarnings(base.course.id);
+
+      expect(result.total).toBe(7499);
+      expect(result.monthly).toHaveLength(2);
+      expect(result.monthly[0]).toEqual({ month: "2026-01", revenue: 4999 });
+      expect(result.monthly[1]).toEqual({ month: "2026-02", revenue: 2500 });
+    });
+
+    it("returns 0 total and empty monthly when no purchases", () => {
+      const result = getCourseEarnings(base.course.id);
+
+      expect(result.total).toBe(0);
+      expect(result.monthly).toEqual([]);
+    });
+  });
+
+  // ─── Per-Course: Completion Rate ───
+
+  describe("getCourseCompletionRate", () => {
+    function seedCourseLessons() {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "Module 1", position: 1 })
+        .returning()
+        .get();
+      const lesson1 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+        .returning()
+        .get();
+      const lesson2 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Lesson 2", position: 2 })
+        .returning()
+        .get();
+      return { mod, lesson1, lesson2 };
+    }
+
+    it("returns 0 when no enrollments", () => {
+      seedCourseLessons();
+
+      expect(getCourseCompletionRate(base.course.id)).toBe(0);
+    });
+
+    it("returns 0 when no lessons exist", () => {
+      testDb
+        .insert(schema.enrollments)
+        .values({ userId: base.user.id, courseId: base.course.id })
+        .run();
+
+      expect(getCourseCompletionRate(base.course.id)).toBe(0);
+    });
+
+    it("returns 100 when all enrolled students completed all lessons", () => {
+      const { lesson1, lesson2 } = seedCourseLessons();
+      testDb
+        .insert(schema.enrollments)
+        .values({ userId: base.user.id, courseId: base.course.id })
+        .run();
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: base.user.id,
+            lessonId: lesson1.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: base.user.id,
+            lessonId: lesson2.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+        ])
+        .run();
+
+      expect(getCourseCompletionRate(base.course.id)).toBe(100);
+    });
+
+    it("returns correct rate with mixed completion", () => {
+      const { lesson1, lesson2 } = seedCourseLessons();
+      const student2 = testDb
+        .insert(schema.users)
+        .values({
+          name: "Student 2",
+          email: "s2@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.enrollments)
+        .values([
+          { userId: base.user.id, courseId: base.course.id },
+          { userId: student2.id, courseId: base.course.id },
+        ])
+        .run();
+
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: base.user.id,
+            lessonId: lesson1.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: base.user.id,
+            lessonId: lesson2.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: student2.id,
+            lessonId: lesson1.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+        ])
+        .run();
+
+      expect(getCourseCompletionRate(base.course.id)).toBe(50);
+    });
+  });
+
+  // ─── Per-Course: Drop-Off ───
+
+  describe("getDropOffLessons", () => {
+    function seedLessonsWithProgress() {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "Module 1", position: 1 })
+        .returning()
+        .get();
+      const l1 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Intro", position: 1 })
+        .returning()
+        .get();
+      const l2 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Deep Dive", position: 2 })
+        .returning()
+        .get();
+      const l3 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Wrap Up", position: 3 })
+        .returning()
+        .get();
+
+      const s1 = base.user;
+      const s2 = testDb
+        .insert(schema.users)
+        .values({
+          name: "Student 2",
+          email: "drop2@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.enrollments)
+        .values([
+          { userId: s1.id, courseId: base.course.id },
+          { userId: s2.id, courseId: base.course.id },
+        ])
+        .run();
+
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: s1.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: s1.id,
+            lessonId: l2.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: s1.id,
+            lessonId: l3.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+          {
+            userId: s2.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed,
+          },
+        ])
+        .run();
+
+      return { l1, l2, l3, s1, s2 };
+    }
+
+    it("returns empty when no enrollments", () => {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "M", position: 1 })
+        .returning()
+        .get();
+      testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "L", position: 1 })
+        .run();
+
+      expect(getDropOffLessons(base.course.id)).toEqual([]);
+    });
+
+    it("returns lessons in order with completion percentages", () => {
+      seedLessonsWithProgress();
+
+      const result = getDropOffLessons(base.course.id);
+
+      expect(result).toHaveLength(3);
+      expect(result[0].completedPercent).toBe(100);
+      expect(result[1].completedPercent).toBe(50);
+      expect(result[2].completedPercent).toBe(50);
+    });
+
+    it("flags the biggest drop-off lesson (>= 10pp)", () => {
+      seedLessonsWithProgress();
+
+      const result = getDropOffLessons(base.course.id);
+
+      expect(result[0].isDropOff).toBe(false);
+      expect(result[1].isDropOff).toBe(true);
+      expect(result[2].isDropOff).toBe(false);
+    });
+
+    it("does not flag drop-off when delta < 10pp", () => {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "M", position: 1 })
+        .returning()
+        .get();
+      const l1 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "A", position: 1 })
+        .returning()
+        .get();
+      const l2 = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "B", position: 2 })
+        .returning()
+        .get();
+
+      const students = Array.from({ length: 20 }, (_, i) =>
+        testDb
+          .insert(schema.users)
+          .values({
+            name: `S${i}`,
+            email: `s${i}@test.com`,
+            role: schema.UserRole.Student,
+          })
+          .returning()
+          .get()
+      );
+
+      testDb
+        .insert(schema.enrollments)
+        .values(
+          students.map((s) => ({ userId: s.id, courseId: base.course.id }))
+        )
+        .run();
+
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          ...students.map((s) => ({
+            userId: s.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed as const,
+          })),
+          ...students.slice(0, 19).map((s) => ({
+            userId: s.id,
+            lessonId: l2.id,
+            status: schema.LessonProgressStatus.Completed as const,
+          })),
+        ])
+        .run();
+
+      const result = getDropOffLessons(base.course.id);
+
+      expect(result.every((l) => !l.isDropOff)).toBe(true);
+    });
+  });
+
+  // ─── Per-Course: Quiz Performance ───
+
+  describe("getQuizPerformance", () => {
+    function seedQuiz() {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "Module 1", position: 1 })
+        .returning()
+        .get();
+      const lesson = testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+        .returning()
+        .get();
+      const quiz = testDb
+        .insert(schema.quizzes)
+        .values({ lessonId: lesson.id, title: "Quiz 1", passingScore: 0.7 })
+        .returning()
+        .get();
+      return { mod, lesson, quiz };
+    }
+
+    it("returns empty when course has no quizzes", () => {
+      const mod = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "M", position: 1 })
+        .returning()
+        .get();
+      testDb
+        .insert(schema.lessons)
+        .values({ moduleId: mod.id, title: "L", position: 1 })
+        .run();
+
+      expect(getQuizPerformance(base.course.id)).toEqual([]);
+    });
+
+    it("returns 0 stats when quiz has no attempts", () => {
+      seedQuiz();
+
+      const result = getQuizPerformance(base.course.id);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].attemptedCount).toBe(0);
+      expect(result[0].passRate).toBe(0);
+      expect(result[0].avgScore).toBe(0);
+    });
+
+    it("computes pass rate and avg score from best attempts per student", () => {
+      const { quiz } = seedQuiz();
+      const student2 = testDb
+        .insert(schema.users)
+        .values({
+          name: "S2",
+          email: "quiz-s2@test.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.quizAttempts)
+        .values([
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.6,
+            passed: false,
+          },
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.9,
+            passed: true,
+          },
+          {
+            userId: student2.id,
+            quizId: quiz.id,
+            score: 0.5,
+            passed: false,
+          },
+        ])
+        .run();
+
+      const result = getQuizPerformance(base.course.id);
+
+      expect(result[0].attemptedCount).toBe(2);
+      expect(result[0].passRate).toBe(50);
+      expect(result[0].avgScore).toBe(0.7);
     });
   });
 });

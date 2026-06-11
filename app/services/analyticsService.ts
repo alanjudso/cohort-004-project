@@ -1,4 +1,15 @@
-import { sum, count, avg, eq, and, gte, min, sql, desc } from "drizzle-orm";
+import {
+  sum,
+  count,
+  avg,
+  eq,
+  and,
+  gte,
+  min,
+  sql,
+  desc,
+  asc,
+} from "drizzle-orm";
 import { db } from "~/db";
 import {
   purchases,
@@ -6,6 +17,12 @@ import {
   courseRatings,
   courses,
   users,
+  modules,
+  lessons,
+  lessonProgress,
+  LessonProgressStatus,
+  quizzes,
+  quizAttempts,
 } from "~/db/schema";
 
 export type AnalyticsPeriod = "7d" | "30d" | "12m" | "all";
@@ -426,4 +443,243 @@ export function getAdminRevenueTimeSeries(opts: {
     date: key,
     revenue: revenueMap.get(key) ?? 0,
   }));
+}
+
+// ─── Per-Course Detail Analytics ───
+
+export type MonthlyEarning = { month: string; revenue: number };
+
+export interface CourseEarnings {
+  total: number;
+  monthly: MonthlyEarning[];
+}
+
+export function getCourseEarnings(courseId: number): CourseEarnings {
+  const totalRow = db
+    .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
+    .from(purchases)
+    .where(eq(purchases.courseId, courseId))
+    .get();
+
+  const rows = db
+    .select({
+      month: sql<string>`strftime('%Y-%m', ${purchases.createdAt})`.as("month"),
+      revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .where(eq(purchases.courseId, courseId))
+    .groupBy(sql`strftime('%Y-%m', ${purchases.createdAt})`)
+    .orderBy(sql`strftime('%Y-%m', ${purchases.createdAt})`)
+    .all();
+
+  return {
+    total: totalRow?.total ?? 0,
+    monthly: rows.map((r) => ({ month: r.month, revenue: r.revenue })),
+  };
+}
+
+export function getCourseCompletionRate(courseId: number): number {
+  const enrollmentCount = db
+    .select({ count: sql<number>`count(*)` })
+    .from(enrollments)
+    .where(eq(enrollments.courseId, courseId))
+    .get();
+
+  const enrolled = enrollmentCount?.count ?? 0;
+  if (enrolled === 0) return 0;
+
+  const courseModules = db
+    .select({ id: modules.id })
+    .from(modules)
+    .where(eq(modules.courseId, courseId))
+    .all();
+
+  if (courseModules.length === 0) return 0;
+
+  const courseLessons = db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .where(
+      sql`${lessons.moduleId} IN (${sql.join(
+        courseModules.map((m) => sql`${m.id}`),
+        sql`, `
+      )})`
+    )
+    .all();
+
+  const totalLessons = courseLessons.length;
+  if (totalLessons === 0) return 0;
+
+  const enrolledUsers = db
+    .select({ userId: enrollments.userId })
+    .from(enrollments)
+    .where(eq(enrollments.courseId, courseId))
+    .all();
+
+  let completedCount = 0;
+  for (const { userId } of enrolledUsers) {
+    const completedLessons = db
+      .select({ count: sql<number>`count(*)` })
+      .from(lessonProgress)
+      .where(
+        and(
+          eq(lessonProgress.userId, userId),
+          eq(lessonProgress.status, LessonProgressStatus.Completed),
+          sql`${lessonProgress.lessonId} IN (${sql.join(
+            courseLessons.map((l) => sql`${l.id}`),
+            sql`, `
+          )})`
+        )
+      )
+      .get();
+
+    if ((completedLessons?.count ?? 0) >= totalLessons) {
+      completedCount++;
+    }
+  }
+
+  return Math.round((completedCount / enrolled) * 100);
+}
+
+export interface DropOffLesson {
+  lessonId: number;
+  lessonTitle: string;
+  moduleTitle: string;
+  position: number;
+  completedPercent: number;
+  isDropOff: boolean;
+}
+
+export function getDropOffLessons(courseId: number): DropOffLesson[] {
+  const enrollmentCount = db
+    .select({ count: sql<number>`count(*)` })
+    .from(enrollments)
+    .where(eq(enrollments.courseId, courseId))
+    .get();
+
+  const enrolled = enrollmentCount?.count ?? 0;
+
+  const orderedLessons = db
+    .select({
+      lessonId: lessons.id,
+      lessonTitle: lessons.title,
+      moduleTitle: modules.title,
+      modulePosition: modules.position,
+      lessonPosition: lessons.position,
+    })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(modules.courseId, courseId))
+    .orderBy(asc(modules.position), asc(lessons.position))
+    .all();
+
+  if (orderedLessons.length === 0 || enrolled === 0) return [];
+
+  const result: DropOffLesson[] = orderedLessons.map((l, idx) => {
+    const completedRow = db
+      .select({ count: sql<number>`count(*)` })
+      .from(lessonProgress)
+      .innerJoin(enrollments, eq(lessonProgress.userId, enrollments.userId))
+      .where(
+        and(
+          eq(enrollments.courseId, courseId),
+          eq(lessonProgress.lessonId, l.lessonId),
+          eq(lessonProgress.status, LessonProgressStatus.Completed)
+        )
+      )
+      .get();
+
+    return {
+      lessonId: l.lessonId,
+      lessonTitle: l.lessonTitle,
+      moduleTitle: l.moduleTitle,
+      position: idx + 1,
+      completedPercent:
+        enrolled > 0
+          ? Math.round(((completedRow?.count ?? 0) / enrolled) * 100)
+          : 0,
+      isDropOff: false,
+    };
+  });
+
+  if (result.length >= 2) {
+    let maxDrop = 0;
+    let maxDropIdx = -1;
+    for (let i = 1; i < result.length; i++) {
+      const drop = result[i - 1].completedPercent - result[i].completedPercent;
+      if (drop > maxDrop && drop >= 10) {
+        maxDrop = drop;
+        maxDropIdx = i;
+      }
+    }
+    if (maxDropIdx >= 0) {
+      result[maxDropIdx].isDropOff = true;
+    }
+  }
+
+  return result;
+}
+
+export interface QuizPerformanceRow {
+  quizId: number;
+  quizTitle: string;
+  lessonTitle: string;
+  attemptedCount: number;
+  passRate: number;
+  avgScore: number;
+}
+
+export function getQuizPerformance(courseId: number): QuizPerformanceRow[] {
+  const courseQuizzes = db
+    .select({
+      quizId: quizzes.id,
+      quizTitle: quizzes.title,
+      lessonTitle: lessons.title,
+      modulePosition: modules.position,
+      lessonPosition: lessons.position,
+    })
+    .from(quizzes)
+    .innerJoin(lessons, eq(quizzes.lessonId, lessons.id))
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(modules.courseId, courseId))
+    .orderBy(asc(modules.position), asc(lessons.position))
+    .all();
+
+  return courseQuizzes.map((q) => {
+    const bestAttempts = db
+      .select({
+        userId: quizAttempts.userId,
+        bestScore: sql<number>`max(${quizAttempts.score})`,
+        passed: sql<number>`max(case when ${quizAttempts.passed} = 1 then 1 else 0 end)`,
+      })
+      .from(quizAttempts)
+      .where(eq(quizAttempts.quizId, q.quizId))
+      .groupBy(quizAttempts.userId)
+      .all();
+
+    const attemptedCount = bestAttempts.length;
+    if (attemptedCount === 0) {
+      return {
+        quizId: q.quizId,
+        quizTitle: q.quizTitle,
+        lessonTitle: q.lessonTitle,
+        attemptedCount: 0,
+        passRate: 0,
+        avgScore: 0,
+      };
+    }
+
+    const passedCount = bestAttempts.filter((a) => a.passed === 1).length;
+    const avgScore =
+      bestAttempts.reduce((sum, a) => sum + a.bestScore, 0) / attemptedCount;
+
+    return {
+      quizId: q.quizId,
+      quizTitle: q.quizTitle,
+      lessonTitle: q.lessonTitle,
+      attemptedCount,
+      passRate: Math.round((passedCount / attemptedCount) * 100),
+      avgScore: Math.round(avgScore * 100) / 100,
+    };
+  });
 }
