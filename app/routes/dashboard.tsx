@@ -1,14 +1,38 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
-import { calculateProgress, getCompletedLessonCount, getTotalLessonCount, getNextIncompleteLesson } from "~/services/progressService";
+import {
+  calculateProgress,
+  getCompletedLessonCount,
+  getTotalLessonCount,
+  getNextIncompleteLesson,
+} from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
-import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, CheckCircle2, GraduationCap, PlayCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  Flame,
+  GraduationCap,
+  PlayCircle,
+  Star,
+  Trophy,
+} from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { data, isRouteErrorResponse } from "react-router";
+import { getUserById } from "~/services/userService";
+import { UserRole } from "~/db/schema";
+import { getTotalXp } from "~/services/xpService";
+import { getLevelFromXp } from "~/lib/xp";
+import { getStreakData } from "~/services/streakService";
 
 export function meta() {
   return [
@@ -59,7 +83,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   const completedCourses = coursesWithProgress.filter((c) => c.isCompleted);
   const inProgressCourses = coursesWithProgress.filter((c) => !c.isCompleted);
 
-  return { inProgressCourses, completedCourses };
+  const currentUser = getUserById(currentUserId);
+  const isStudent = currentUser?.role === UserRole.Student;
+  const gamification = isStudent
+    ? (() => {
+        const totalXp = getTotalXp(currentUserId);
+        const levelInfo = getLevelFromXp(totalXp);
+        const streak = getStreakData(currentUserId);
+        return { totalXp, ...levelInfo, ...streak };
+      })()
+    : null;
+
+  return { inProgressCourses, completedCourses, gamification };
 }
 
 function DashboardCardSkeleton() {
@@ -102,7 +137,7 @@ export function HydrateFallback() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { inProgressCourses, completedCourses } = loaderData;
+  const { inProgressCourses, completedCourses, gamification } = loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
 
   return (
@@ -123,6 +158,83 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         </p>
       </div>
 
+      {gamification && (
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardContent className="flex items-center gap-3 py-4">
+              <div className="rounded-lg bg-yellow-100 p-2 dark:bg-yellow-500/20">
+                <Star className="size-5 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total XP</p>
+                <p className="text-2xl font-bold">{gamification.totalXp}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-purple-100 p-2 dark:bg-purple-500/20">
+                  <Star className="size-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Level</p>
+                  <p className="text-2xl font-bold">{gamification.level}</p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+                  <span>Progress</span>
+                  <span>
+                    {gamification.xpIntoCurrentLevel} /{" "}
+                    {gamification.nextLevelXp} XP
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-purple-500 transition-all"
+                    style={{
+                      width: `${Math.round((gamification.xpIntoCurrentLevel / gamification.nextLevelXp) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="flex items-center gap-3 py-4">
+              <div className="rounded-lg bg-orange-100 p-2 dark:bg-orange-500/20">
+                <Flame className="size-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Current Streak</p>
+                <p className="text-2xl font-bold">
+                  {gamification.currentStreak} day
+                  {gamification.currentStreak !== 1 ? "s" : ""}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="flex items-center gap-3 py-4">
+              <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-500/20">
+                <Trophy className="size-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Longest Streak</p>
+                <p className="text-2xl font-bold">
+                  {gamification.longestStreak} day
+                  {gamification.longestStreak !== 1 ? "s" : ""}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {totalCourses === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <GraduationCap className="mb-4 size-12 text-muted-foreground/50" />
@@ -142,8 +254,14 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               <h2 className="mb-4 text-xl font-semibold">In Progress</h2>
               <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {inProgressCourses.map((course) => (
-                  <Card key={course.enrollmentId} className="flex flex-col overflow-hidden pt-0">
-                    <Link to={`/courses/${course.courseSlug}`} className="aspect-video overflow-hidden">
+                  <Card
+                    key={course.enrollmentId}
+                    className="flex flex-col overflow-hidden pt-0"
+                  >
+                    <Link
+                      to={`/courses/${course.courseSlug}`}
+                      className="aspect-video overflow-hidden"
+                    >
                       <CourseImage
                         src={course.coverImageUrl}
                         alt={course.courseTitle}
@@ -211,8 +329,14 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               <h2 className="mb-4 text-xl font-semibold">Completed</h2>
               <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {completedCourses.map((course) => (
-                  <Card key={course.enrollmentId} className="flex flex-col overflow-hidden pt-0">
-                    <Link to={`/courses/${course.courseSlug}`} className="relative aspect-video overflow-hidden">
+                  <Card
+                    key={course.enrollmentId}
+                    className="flex flex-col overflow-hidden pt-0"
+                  >
+                    <Link
+                      to={`/courses/${course.courseSlug}`}
+                      className="relative aspect-video overflow-hidden"
+                    >
                       <CourseImage
                         src={course.coverImageUrl}
                         alt={course.courseTitle}
@@ -236,9 +360,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                     <CardContent className="flex-1">
                       <div className="flex items-center gap-2 text-sm text-green-600">
                         <CheckCircle2 className="size-4" />
-                        <span>
-                          Completed — {course.totalLessons} lessons
-                        </span>
+                        <span>Completed — {course.totalLessons} lessons</span>
                       </div>
                     </CardContent>
                     <CardFooter>
@@ -270,7 +392,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 401) {
       title = "Sign in required";
-      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "Please select a user from the DevUI panel.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;
