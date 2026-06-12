@@ -17,6 +17,7 @@ import {
   Sun,
   LogOut,
   Settings,
+  Star,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -45,12 +46,21 @@ interface Notification {
   createdAt: string;
 }
 
+interface GamificationData {
+  totalXp: number;
+  level: number;
+  currentLevelXp: number;
+  nextLevelXp: number;
+  xpIntoCurrentLevel: number;
+}
+
 interface SidebarProps {
   currentUser: CurrentUser | null;
   recentCourses?: RecentCourse[];
   isTeamAdmin?: boolean;
   notifications?: Notification[];
   unreadCount?: number;
+  gamification?: GamificationData | null;
 }
 
 interface NavItem {
@@ -129,6 +139,7 @@ export function Sidebar({
   isTeamAdmin = false,
   notifications = [],
   unreadCount = 0,
+  gamification,
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
   const [isDark, setIsDark] = useState(false);
@@ -233,6 +244,36 @@ export function Sidebar({
                 </div>
               </NavLink>
             ))}
+          </div>
+        </div>
+      )}
+
+      {gamification && (
+        <div className="border-t border-sidebar-border p-3">
+          <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+            Progress
+          </div>
+          <div className="rounded-md bg-sidebar-accent/50 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Star className="size-4 text-yellow-500" />
+              <span className="text-sm font-semibold">
+                Level {gamification.level}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="h-1.5 flex-1 rounded-full bg-sidebar-accent">
+                <div
+                  className="h-1.5 rounded-full bg-yellow-500 transition-all"
+                  style={{
+                    width: `${Math.round((gamification.xpIntoCurrentLevel / gamification.nextLevelXp) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+            <div className="mt-1 text-xs text-sidebar-foreground/50">
+              {gamification.xpIntoCurrentLevel} / {gamification.nextLevelXp} XP
+              to Level {gamification.level + 1}
+            </div>
           </div>
         </div>
       )}

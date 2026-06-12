@@ -305,6 +305,19 @@ export const notifications = sqliteTable("notifications", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const xpEvents = sqliteTable("xp_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  amount: integer("amount").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: integer("source_id").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const videoWatchEvents = sqliteTable("video_watch_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")

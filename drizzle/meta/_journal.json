@@ -57,6 +57,13 @@
       "when": 1781181812086,
       "tag": "0008_dapper_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1781267155748,
+      "tag": "0009_giant_cyclops",
+      "breakpoints": true
     }
   ]
 }

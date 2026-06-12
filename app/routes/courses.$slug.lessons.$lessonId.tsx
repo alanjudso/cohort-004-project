@@ -20,6 +20,7 @@ import {
   getLastWatchPosition,
   calculateWatchProgress,
 } from "~/services/videoTrackingService";
+import { awardXp } from "~/services/xpService";
 import {
   getQuizByLessonId,
   getQuizWithQuestions,
@@ -347,6 +348,12 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "mark-complete") {
     markLessonComplete(currentUserId, lessonId);
+    awardXp({
+      userId: currentUserId,
+      amount: 10,
+      sourceType: "lesson_completion",
+      sourceId: lessonId,
+    });
     return { success: true };
   }
 
