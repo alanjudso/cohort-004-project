@@ -21,6 +21,7 @@ import {
   calculateWatchProgress,
 } from "~/services/videoTrackingService";
 import { awardXp } from "~/services/xpService";
+import { recordStreakActivity } from "~/services/streakService";
 import {
   getQuizByLessonId,
   getQuizWithQuestions,
@@ -354,6 +355,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       sourceType: "lesson_completion",
       sourceId: lessonId,
     });
+    recordStreakActivity(currentUserId);
     return { success: true };
   }
 

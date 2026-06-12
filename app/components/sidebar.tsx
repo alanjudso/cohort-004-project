@@ -18,6 +18,8 @@ import {
   LogOut,
   Settings,
   Star,
+  Flame,
+  Trophy,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -52,6 +54,8 @@ interface GamificationData {
   currentLevelXp: number;
   nextLevelXp: number;
   xpIntoCurrentLevel: number;
+  currentStreak: number;
+  longestStreak: number;
 }
 
 interface SidebarProps {
@@ -273,6 +277,19 @@ export function Sidebar({
             <div className="mt-1 text-xs text-sidebar-foreground/50">
               {gamification.xpIntoCurrentLevel} / {gamification.nextLevelXp} XP
               to Level {gamification.level + 1}
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Flame className="size-4 text-orange-500" />
+                <span className="text-sm font-medium">
+                  {gamification.currentStreak} day
+                  {gamification.currentStreak !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 text-xs text-sidebar-foreground/50">
+                <Trophy className="size-3" />
+                Best: {gamification.longestStreak}
+              </div>
             </div>
           </div>
         </div>

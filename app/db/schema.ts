@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export enum UserRole {
   Student = "student",
@@ -317,6 +323,23 @@ export const xpEvents = sqliteTable("xp_events", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const streakActivities = sqliteTable(
+  "streak_activities",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    activityDate: text("activity_date").notNull(),
+  },
+  (table) => [
+    uniqueIndex("streak_activities_user_date_idx").on(
+      table.userId,
+      table.activityDate
+    ),
+  ]
+);
 
 export const videoWatchEvents = sqliteTable("video_watch_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),

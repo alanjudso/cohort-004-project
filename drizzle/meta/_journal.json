@@ -64,6 +64,13 @@
       "when": 1781267155748,
       "tag": "0009_giant_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1781267652896,
+      "tag": "0010_careless_magik",
+      "breakpoints": true
     }
   ]
 }
