@@ -15,6 +15,7 @@ import {
   getLessonProgressForCourse,
   markLessonComplete,
   markLessonInProgress,
+  checkModuleCompletion,
 } from "~/services/progressService";
 import {
   getLastWatchPosition,
@@ -356,7 +357,8 @@ export async function action({ params, request }: Route.ActionArgs) {
       sourceId: lessonId,
     });
     recordStreakActivity(currentUserId);
-    return { success: true };
+    const moduleCompletion = checkModuleCompletion(currentUserId, lessonId);
+    return { success: true, moduleCompletion };
   }
 
   if (intent === "toggle-bookmark") {
@@ -535,12 +537,19 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   const isCompleted =
     lessonStatus === LessonProgressStatus.Completed || justCompleted;
 
-  // Navigate to next lesson after marking complete
   useEffect(() => {
-    if (justCompleted && nextLesson) {
-      navigate(`/courses/${course.slug}/lessons/${nextLesson.id}`);
+    if (justCompleted) {
+      const mc = fetcher.data?.moduleCompletion;
+      if (mc) {
+        toast.success(`Module complete! +${mc.totalXp} XP`, {
+          description: mc.moduleTitle,
+        });
+      }
+      if (nextLesson) {
+        navigate(`/courses/${course.slug}/lessons/${nextLesson.id}`);
+      }
     }
-  }, [justCompleted, nextLesson, course.slug, navigate]);
+  }, [justCompleted, nextLesson, course.slug, navigate, fetcher.data]);
 
   const quizResult = quizFetcher.data?.quizResult ?? null;
   const isSubmittingQuiz = quizFetcher.state !== "idle";
