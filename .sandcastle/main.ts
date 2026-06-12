@@ -5,6 +5,6 @@ await run({
   agent: claudeCode("claude-opus-4-6"),
   sandbox: docker(),
   promptFile: "./.sandcastle/prompt.md",
-  maxIterations: 3,
+  maxIterations: 10,
   completionSignal: "<promise>NO MORE TASKS</promise>",
 });

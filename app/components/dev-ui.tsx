@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Form, useLocation } from "react-router";
+import { Form, useFetcher, useLocation } from "react-router";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import type { UserRole } from "~/db/schema";
@@ -50,6 +50,7 @@ export function DevUI({
   const [minimized, setMinimized] = useState(false);
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const fetcher = useFetcher();
   if (minimized) {
     return (
       <div className="fixed bottom-4 right-4 z-50">
@@ -115,24 +116,27 @@ export function DevUI({
           {open && (
             <div className="absolute bottom-full mb-1 max-h-64 w-full overflow-y-auto rounded-md border bg-popover shadow-md">
               {users.map((user) => (
-                <Form
+                <button
                   key={user.id}
-                  method="post"
-                  action={`/api/switch-user?redirectTo=${encodeURIComponent(location.pathname + location.search)}`}
+                  type="button"
+                  onClick={() => {
+                    fetcher.submit(
+                      { userId: user.id },
+                      {
+                        method: "post",
+                        action: `/api/switch-user?redirectTo=${encodeURIComponent(location.pathname + location.search)}`,
+                      }
+                    );
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent",
+                    currentUser?.id === user.id && "bg-accent"
+                  )}
                 >
-                  <input type="hidden" name="userId" value={user.id} />
-                  <button
-                    type="submit"
-                    onClick={() => setOpen(false)}
-                    className={cn(
-                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent",
-                      currentUser?.id === user.id && "bg-accent"
-                    )}
-                  >
-                    <span className="flex-1 truncate">{user.name}</span>
-                    <RoleBadge role={user.role} />
-                  </button>
-                </Form>
+                  <span className="flex-1 truncate">{user.name}</span>
+                  <RoleBadge role={user.role} />
+                </button>
               ))}
             </div>
           )}
